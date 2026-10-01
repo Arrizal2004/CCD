@@ -1,0 +1,129 @@
+name: campus-cloud-dashboard
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ccd-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ccddb
+      POSTGRES_USER:     ccd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ccd123}
+      # Dipakai initdb/01-guacamole-init.sh untuk membuat user database Guacamole.
+      GUAC_DB_PASSWORD: ${GUAC_DB_PASSWORD:-guacamole123}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    # Lewat TCP (127.0.0.1): server sementara saat init skrip di initdb/ hanya listen di unix socket,
+    # jadi "healthy" baru muncul setelah database + skema Guacamole benar-benar siap.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ccd -d ccddb"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ccd-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning --bind 0.0.0.0
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  guacd:
+    image: guacamole/guacd:1.5.5
+    container_name: ccd-guacd
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4823:4822"
+    # Healthcheck bawaan image baru jalan tiap 5 menit — terlalu lambat untuk dijadikan syarat urutan start.
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 4822 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # Guacamole web app — akses di :8081/guacamole
+  guacamole:
+    image: guacamole/guacamole:1.5.5
+    container_name: ccd-guacamole
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8080"
+    environment:
+      GUACD_HOSTNAME:  guacd
+      GUACD_PORT:      4822
+      POSTGRESQL_HOSTNAME: postgres
+      POSTGRESQL_PORT:     5432
+      POSTGRESQL_DATABASE: guacamoledb
+      POSTGRESQL_USER:     guacamole
+      POSTGRESQL_PASSWORD: ${GUAC_DB_PASSWORD:-guacamole123}
+    # Siap = webapp Tomcat sudah men-deploy /guacamole (butuh DB + skema + guacd siap lebih dulu).
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs -o /dev/null http://localhost:8080/guacamole/api/languages || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 15s
+    depends_on:
+      guacd:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  backend:
+    build: .
+    container_name: ccd-backend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8001:8000"
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://ccd:${POSTGRES_PASSWORD:-ccd123}@postgres:5432/ccddb
+      - GUACD_HOST=guacd
+      - GUACD_PORT=4822
+      - GUAC_URL=http://guacamole:8080/guacamole
+      - GUAC_PUBLIC_URL=/guacamole
+      - GUAC_ADMIN_USER=guacadmin
+      - GUAC_DS=postgresql
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost}
+    volumes:
+      - ./static:/app/static
+    # Backend baru start setelah semua dependensi benar-benar siap (bukan sekadar container berjalan).
+    # Tanpa ini backend bisa start saat Guacamole belum siap → rotasi password admin Guacamole gagal
+    # → Connect tidak jalan sampai backend di-restart manual.
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      guacd:
+        condition: service_healthy
+      guacamole:
+        condition: service_healthy
+
+  frontend:
+    build: ../frontend
+    container_name: ccd-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  redis_data:
+  postgres_data:

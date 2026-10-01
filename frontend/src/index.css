@@ -1,0 +1,119 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --bg: #0b0f1a;
+    --bg-panel: #0e1525;
+    --bg-card: #111827;
+    --bg-card2: #141e30;
+    --bg-hover: #1a2540;
+    --border: #1e2d47;
+    --border-light: #243655;
+
+    --cyan: #00e5ff;
+    --cyan2: #00b8d4;
+    --cyan-glow: rgba(0, 229, 255, 0.12);
+    --green: #00e676;
+    --green-glow: rgba(0, 230, 118, 0.12);
+    --yellow: #ffd600;
+    --yellow-glow: rgba(255, 214, 0, 0.12);
+    --red: #ff1744;
+    --red-glow: rgba(255, 23, 68, 0.12);
+    --purple: #d500f9;
+    --purple-glow: rgba(213, 0, 249, 0.12);
+    --pink: #ff4081;
+    --blue: #2979ff;
+    --orange: #ff6d00;
+
+    --text: #e8f0fe;
+    --text2: #8baac8;
+    --text3: #4a6a8a;
+    --mono: #64ffda;
+
+    --font: 'Inter', sans-serif;
+    --fmono: 'JetBrains Mono', monospace;
+
+    --r: 6px;
+    --r2: 10px;
+    --r3: 14px;
+}
+
+[data-theme="light"] {
+    --bg: #f0f4f8;
+    --bg-panel: #ffffff;
+    --bg-card: #ffffff;
+    --bg-card2: #f8fafc;
+    --bg-hover: #e8f0fe;
+    --border: #d0dce8;
+    --border-light: #b8cce0;
+
+    --cyan: #0077cc;
+    --cyan2: #0066bb;
+    --cyan-glow: rgba(0, 119, 204, 0.10);
+    --green: #00875a;
+    --green-glow: rgba(0, 135, 90, 0.10);
+    --yellow: #b86800;
+    --yellow-glow: rgba(184, 104, 0, 0.10);
+    --red: #cc0033;
+    --red-glow: rgba(204, 0, 51, 0.10);
+    --purple: #7700cc;
+    --purple-glow: rgba(119, 0, 204, 0.10);
+    --pink: #cc0066;
+    --blue: #0044cc;
+    --orange: #cc4400;
+
+    --text: #1a2535;
+    --text2: #3a5068;
+    --text3: #6a8aaa;
+    --mono: #006644;
+
+    --font: 'Inter', sans-serif;
+    --fmono: 'JetBrains Mono', monospace;
+}
+
+html,
+body,
+#root {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+    border-radius: 3px;
+}
+
+button {
+    cursor: pointer;
+    border: none;
+    font-family: var(--font);
+    background: none;
+}
+
+input,
+select {
+    font-family: var(--font);
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}

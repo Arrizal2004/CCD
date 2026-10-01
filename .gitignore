@@ -1,0 +1,17 @@
+__pycache__/
+*.pyc
+node_modules/
+dist/
+.env
+
+# Catatan kerja internal berisi detail deployment/infrastruktur nyata, tidak untuk repo publik.
+ADAPTATION_NOTES.md
+docs/PANDUAN_PRESENTASI_openSUSE.md
+
+# Konten upload user sungguhan (dokumen tiket helpdesk, dokumen pengajuan infra) —
+# data pribadi, tidak pernah untuk repo publik. Foldernya dibuat otomatis oleh
+# main.py saat backend start (os.makedirs(..., exist_ok=True)).
+backend/static/uploads/
+
+# Skrip diagnostik sementara (dibuat/dihapus selama sesi dev, kadang lupa terhapus).
+backend/syntax_check*.py
