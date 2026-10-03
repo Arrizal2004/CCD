@@ -114,14 +114,16 @@ async def _sync_vms_table(host_key: str, vms: list[dict]):
     pool = await get_pool()
     async with pool.acquire() as conn:
         for vm in vms:
-            await conn.execute("""
-                INSERT INTO vms (vm_id, host_name, vm_name, state, updated_at)
-                VALUES ($1, $2, $3, $4, NOW())
-                ON CONFLICT (vm_id, host_name) DO UPDATE SET
-                    vm_name    = EXCLUDED.vm_name,
-                    state      = EXCLUDED.state,
-                    updated_at = NOW()
-            """, str(vm["vmid"]), host_key, vm.get("name") or str(vm["vmid"]), vm.get("status"))
+            args = (str(vm["vmid"]), host_key, vm.get("name") or str(vm["vmid"]), vm.get("status"))
+            # UPDATE dulu, INSERT hanya untuk VM baru. INSERT ... ON CONFLICT tetap mengambil nomor
+            # dari sequence CCDID setiap dipanggil, sehingga nomor VM baru akan melompat jauh.
+            done = await conn.execute(
+                "UPDATE vms SET vm_name = $3, state = $4, updated_at = NOW() WHERE vm_id = $1 AND host_name = $2",
+                *args)
+            if done == "UPDATE 0":
+                await conn.execute(
+                    """INSERT INTO vms (vm_id, host_name, vm_name, state, updated_at)
+                       VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (vm_id, host_name) DO NOTHING""", *args)
 
 
 @router.get("/all-vms")
@@ -313,6 +315,8 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT vm_id, ssh_host, ssh_port FROM vm_credentials WHERE host_name = $1", host_key)
+        ccd_ids = {r["vm_id"]: r["ccd_id"] for r in await conn.fetch(
+            "SELECT vm_id, ccd_id FROM vms WHERE host_name = $1", host_key)}
     manual = {r["vm_id"]: r["ssh_host"] for r in rows if r["ssh_host"]}
     ssh_ports = {r["vm_id"]: r["ssh_port"] for r in rows if r["ssh_host"]}
     if user.get("role") not in _ADMIN_ROLES:
@@ -321,6 +325,7 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
     agent = await _agent_ips(client, label, node, running)
     for vm in vms:
         vid = str(vm["vmid"])
+        vm["ccd_id"] = ccd_ids.get(vid)   # nomor unik lintas Proxmox (lihat migrations/V006)
         if vid in visible:
             vm["ip"] = agent.get(vid)
             vm["manual_ip"] = manual.get(vid)

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { fetchTickets, fetchTicket, createTicket, updateTicketStatus, replyTicket, uploadTicketAttachment } from '../api';
+import { fetchTickets, fetchTicket, createTicket, updateTicketStatus, replyTicket, uploadTicketAttachment, fetchMyProxmoxVms } from '../api';
+import { formatCcdId } from '../format';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const WS_BASE  = API_BASE
@@ -66,6 +67,16 @@ const CAT_LABEL = { REMOTE_ISSUE: 'Remote Issue', PERFORMANCE: 'Performance', RE
 const ROLE_COLOR = { superadmin: '#ff6b35', admin: 'var(--cyan)', sysadmin: 'var(--green)', student: 'var(--purple)' };
 const STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
 const CATEGORIES = ['REMOTE_ISSUE', 'PERFORMANCE', 'RESOURCE_REQUEST', 'OTHERS'];
+
+// Nama VM dan CCDID. Admin juga melihat VMID dan host-nya, karena VMID hanya unik per Proxmox.
+// Tiket lama tanpa CCDID tetap menampilkan VMID.
+function vmLabel(t, isAdmin) {
+    const parts = [t.vm_snapshot?.vm_name, t.ccd_id != null ? formatCcdId(t.ccd_id) : null];
+    if (t.vm_id && (isAdmin || t.ccd_id == null)) {
+        parts.push(`VMID ${t.vm_id}${isAdmin && t.host_name ? ` @ ${t.host_name.replace('__', '/')}` : ''}`);
+    }
+    return parts.filter(Boolean).join(' · ') || '—';
+}
 
 function fmt(iso) {
     if (!iso) return '—';
@@ -174,7 +185,7 @@ export default function TicketsPage({ currentUser }) {
             {/* ── Filter bar ── */}
             <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
                 <input value={search} onChange={e => setSearch(e.target.value)}
-                    placeholder="🔍 Cari judul / no. tiket / student"
+                    placeholder="🔍 Cari judul / no. tiket / CCDID / student"
                     style={{ ...inp, flex: 1, minWidth: 200 }} />
                 <select value={category} onChange={e => setCategory(e.target.value)} style={inp}>
                     <option value="">Semua Kategori</option>
@@ -215,7 +226,7 @@ export default function TicketsPage({ currentUser }) {
                                         <td style={{ ...TD, fontFamily: 'var(--fmono)', color: 'var(--cyan)' }}>{t.ticket_number}</td>
                                         {isAdmin && <td style={{ ...TD, color: 'var(--text)' }}>{t.student_name}</td>}
                                         <td style={{ ...TD, color: 'var(--text)', maxWidth: 320 }}>{t.title}</td>
-                                        <td style={{ ...TD, fontFamily: 'var(--fmono)' }}>{t.vm_id || '—'}</td>
+                                        <td style={{ ...TD, fontFamily: 'var(--fmono)' }}>{vmLabel(t, isAdmin)}</td>
                                         <td style={TD}>{CAT_LABEL[t.category] || t.category}</td>
                                         <td style={TD}><Badge text={t.status} color={STATUS_COLOR[t.status] || 'var(--text3)'} /></td>
                                         <td style={{ ...TD, fontFamily: 'var(--fmono)', whiteSpace: 'nowrap' }}>{fmt(t.created_at)}</td>
@@ -237,18 +248,26 @@ export default function TicketsPage({ currentUser }) {
                 )}
             </div>
 
-            {creating && <CreateTicketModal onClose={() => setCreating(false)} onCreated={() => { setCreating(false); refresh(); }} />}
+            {creating && <CreateTicketModal isAdmin={isAdmin} onClose={() => setCreating(false)} onCreated={() => { setCreating(false); refresh(); }} />}
             {openId    && <TicketThread ticketId={openId} currentUser={currentUser} onClose={() => { setOpenId(null); }} onChanged={refresh} />}
         </div>
     );
 }
 
 // ── Create Ticket Modal (juga dipakai dari VmDetailModal) ─────────────────────
-export function CreateTicketModal({ onClose, onCreated, vm }) {
+export function CreateTicketModal({ onClose, onCreated, vm, isAdmin = false }) {
     const [form, setForm] = useState({
         title: '', category: vm ? 'REMOTE_ISSUE' : 'OTHERS', description: '',
-        vm_id: vm?.vm_id || '', host_name: vm?.hostName || vm?.host_name || '',
+        vm_id: vm?.vm_id || '', host_name: vm?.hostName || vm?.host_name || '', ccd_id: '',
     });
+    // Tiket dari menu Helpdesk: mahasiswa memilih VM-nya sendiri (CCDID), admin mengetik CCDID.
+    const [myVms, setMyVms] = useState([]);
+    useEffect(() => {
+        if (vm || isAdmin) return undefined;
+        let alive = true;
+        fetchMyProxmoxVms().then(list => { if (alive) setMyVms(list.filter(v => v.ccd_id != null)); }).catch(() => {});
+        return () => { alive = false; };
+    }, [vm, isAdmin]);
     const [saving, setSaving] = useState(false);
     const [err, setErr] = useState('');
     const [attachFile, setAttachFile] = useState(null);
@@ -270,7 +289,7 @@ export function CreateTicketModal({ onClose, onCreated, vm }) {
                     await replyTicket(result.id, '', { url: uploaded.url, filename: uploaded.filename });
                 } catch { /* ticket created — ignore upload failure silently */ }
             }
-            onCreated?.();
+            onCreated?.(result);
         } catch (e) { setErr(e?.response?.data?.detail || e.message); }
         finally { setSaving(false); }
     };
@@ -282,14 +301,22 @@ export function CreateTicketModal({ onClose, onCreated, vm }) {
             <div style={{ width: 'min(560px,95vw)' }}>
                 <Header title="Open Support Ticket" onClose={onClose} />
                 <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {vm && <div style={{ fontSize: 11, color: 'var(--cyan)', fontFamily: 'var(--fmono)' }}>VM: {vm.vm_name} ({vm.vm_id})</div>}
+                    {vm && <div style={{ fontSize: 11, color: 'var(--cyan)', fontFamily: 'var(--fmono)' }}>VM: {vm.vm_name} ({vm.ccd_id != null ? formatCcdId(vm.ccd_id) : vm.vm_id})</div>}
                     <Field label="Judul"><input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Ringkas masalahnya" style={{ ...inp, width: '100%', boxSizing: 'border-box' }} /></Field>
                     <Field label="Kategori">
                         <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} style={{ ...inp, width: '100%' }}>
                             {CATEGORIES.map(c => <option key={c} value={c}>{CAT_LABEL[c]}</option>)}
                         </select>
                     </Field>
-                    {!vm && <Field label="VM ID (opsional)"><input value={form.vm_id} onChange={e => setForm(f => ({ ...f, vm_id: e.target.value }))} placeholder="vm-id terkait" style={{ ...inp, width: '100%', boxSizing: 'border-box' }} /></Field>}
+                    {!vm && !isAdmin && (
+                        <Field label="VM terkait (opsional)">
+                            <select value={form.ccd_id} onChange={e => setForm(f => ({ ...f, ccd_id: e.target.value }))} style={{ ...inp, width: '100%' }}>
+                                <option value="">Tidak terkait VM tertentu</option>
+                                {myVms.map(v => <option key={v.ccd_id} value={String(v.ccd_id)}>{v.name || 'VM'} ({formatCcdId(v.ccd_id)})</option>)}
+                            </select>
+                        </Field>
+                    )}
+                    {!vm && isAdmin && <Field label="CCDID (opsional)"><input value={form.ccd_id} onChange={e => setForm(f => ({ ...f, ccd_id: e.target.value }))} placeholder="mis. CCD-0007" style={{ ...inp, width: '100%', boxSizing: 'border-box' }} /></Field>}
                     <Field label="Deskripsi"><textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} rows={5} placeholder="Jelaskan detail masalah / permintaan" style={{ ...inp, width: '100%', boxSizing: 'border-box', resize: 'vertical', fontFamily: 'inherit' }} /></Field>
                     {/* Optional file attachment — uploaded as the ticket's first message */}
                     <Field label="Lampiran (opsional)">
@@ -438,7 +465,7 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                         <Row k="Status"><Badge text={t.status} color={STATUS_COLOR[t.status]} /></Row>
                         <Row k="Student">{t.student_name}</Row>
                         <Row k="Kategori">{CAT_LABEL[t.category] || t.category}</Row>
-                        <Row k="VM">{t.vm_id || '—'}</Row>
+                        <Row k="VM">{vmLabel(t, isAdmin)}</Row>
                         <Row k="Dibuat">{fmt(t.created_at)}</Row>
                         {t.closed_at && <Row k="Ditutup">{fmt(t.closed_at)}</Row>}
                         <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>Deskripsi</div>

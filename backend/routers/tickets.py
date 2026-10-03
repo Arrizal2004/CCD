@@ -9,6 +9,7 @@ import io
 import json
 import logging
 import mimetypes
+import re
 import unicodedata
 import uuid
 import zipfile
@@ -19,7 +20,7 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-from database import get_pool
+from database import get_pool, get_student_vm_ids
 from auth import get_current_user, decode_token, Role
 
 # ── Flexible auth: Bearer header OR ?token= query param ──────────────────────
@@ -162,7 +163,33 @@ class CreateTicket(BaseModel):
     description: str = ""
     vm_id:       Optional[str] = None
     host_name:   Optional[str] = None
+    ccd_id:      Optional[str] = None   # mis. "CCD-0007" atau "7"; menggantikan vm_id + host_name
     vm_snapshot: Optional[dict] = None
+
+
+def _parse_ccd_id(text: str) -> int | None:
+    m = re.fullmatch(r"\s*(?:ccd-?)?0*(\d{1,9})\s*", text or "", re.IGNORECASE)
+    return int(m[1]) if m else None
+
+
+async def _resolve_vm(body: CreateTicket) -> tuple[Optional[str], Optional[str], Optional[int], Optional[dict]]:
+    """VM tiket -> (vm_id, host_name, ccd_id, data VM). CCDID diterjemahkan ke host + VMID; tiket dari
+    Detail VM (host + VMID) dilengkapi CCDID-nya."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if body.ccd_id:
+            ccd = _parse_ccd_id(body.ccd_id)
+            row = await conn.fetchrow(
+                "SELECT vm_id, host_name, ccd_id, vm_name, state FROM vms WHERE ccd_id = $1", ccd) if ccd else None
+            if not row:
+                raise HTTPException(400, f"CCDID '{body.ccd_id[:20]}' tidak ditemukan")
+            return row["vm_id"], row["host_name"], row["ccd_id"], dict(row)
+        if body.vm_id and body.host_name:
+            row = await conn.fetchrow(
+                "SELECT vm_id, host_name, ccd_id, vm_name, state FROM vms WHERE vm_id = $1 AND host_name = $2",
+                body.vm_id, body.host_name)
+            return body.vm_id, body.host_name, row["ccd_id"] if row else None, dict(row) if row else None
+    return body.vm_id, body.host_name, None, None
 
 
 class StatusUpdate(BaseModel):
@@ -183,6 +210,7 @@ def _ticket_row(r) -> dict:
         "student_name": r.get("student_name") if isinstance(r, dict) else r["student_name"],
         "vm_id": r["vm_id"],
         "host_name": r["host_name"],
+        "ccd_id": r.get("ccd_id") if isinstance(r, dict) else r["ccd_id"],
         "title": r["title"],
         "category": r["category"],
         "description": r["description"],
@@ -224,20 +252,29 @@ async def create_ticket(body: CreateTicket, request: Request, user: dict = Depen
                 "Akses terbatas. Ajukan Infrastructure Request dan tunggu persetujuan admin "
                 "untuk mendapatkan akses penuh ke fitur Helpdesk."
             )
+    vm_id, host_name, ccd_id, vm = await _resolve_vm(body)
+    # VMID hanya unik per Proxmox, jadi yang dicek pasangan host + VMID: mahasiswa hanya boleh
+    # melaporkan VM miliknya.
+    if user.get("role") == Role.STUDENT and host_name and \
+            (vm_id, host_name) not in await get_student_vm_ids(int(user["sub"])):
+        if body.ccd_id:   # pesan sama dengan CCDID yang tidak ada, supaya CCDID VM lain tidak bisa ditebak
+            raise HTTPException(400, f"CCDID '{body.ccd_id[:20]}' tidak ditemukan")
+        raise HTTPException(403, "VM ini tidak ditugaskan kepada Anda")
     category = body.category if body.category in CATEGORIES else "OTHERS"
-    snap = json.dumps(body.vm_snapshot) if body.vm_snapshot else None
+    snapshot = body.vm_snapshot or ({"vm_name": vm["vm_name"], "state": vm["state"]} if vm else None)
+    snap = json.dumps(snapshot) if snapshot else None
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO tickets (student_id, vm_id, host_name, title, category, description, vm_snapshot)
-               VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id""",
-            int(user["sub"]), body.vm_id, body.host_name, body.title.strip(),
+            """INSERT INTO tickets (student_id, vm_id, host_name, ccd_id, title, category, description, vm_snapshot)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id""",
+            int(user["sub"]), vm_id, host_name, ccd_id, body.title.strip(),
             category, body.description, snap)
         tid = row["id"]
         number = f"TKT-{tid:04d}"
         await conn.execute("UPDATE tickets SET ticket_number = $2 WHERE id = $1", tid, number)
     await log_activity(user, "TICKET_CREATE", "INFO",
-                       {"id": body.vm_id, "name": number},
+                       {"id": vm_id, "name": number},
                        f"Tiket {number} dibuat: {body.title.strip()}", request)
     return {"id": tid, "ticket_number": number, "status": "OPEN"}
 
@@ -256,7 +293,8 @@ async def list_tickets(
     if category in CATEGORIES:
         where.append(f"t.category = ${i}"); params.append(category); i += 1
     if search:
-        where.append(f"(t.title ILIKE ${i} OR t.ticket_number ILIKE ${i} OR u.username ILIKE ${i})")
+        where.append(f"(t.title ILIKE ${i} OR t.ticket_number ILIKE ${i} OR u.username ILIKE ${i} "
+                     f"OR 'CCD-' || lpad(t.ccd_id::text, 4, '0') ILIKE ${i})")
         params.append(f"%{search}%"); i += 1
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     pool = await get_pool()

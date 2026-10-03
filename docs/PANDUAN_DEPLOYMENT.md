@@ -289,6 +289,9 @@ Hanya superadmin dan sysadmin. Tombol **Resize** di daftar VM aktif kalau VM sud
 1. Login ke dashboard dengan akun mahasiswa.
 2. Tab **Servers** — hanya VM yang di-assign yang tampil, dengan tombol aksi (Start/Stop/Snapshot/**Connect**). Nama host Proxmox dan panel Host Performance tidak ditampilkan ke mahasiswa, dan tab **Topology** menampilkan username mereka sebagai induk VM.
 3. Klik **Connect** → sesi SSH/RDP terbuka **langsung di tab browser** (Apache Guacamole) — tidak perlu install client SSH/RDP apa pun.
+4. Ada masalah dengan VM? Klik nama VM untuk membuka Detail VM, lalu **Laporkan masalah**. Tiket otomatis berisi VM tersebut beserta kondisinya saat dilaporkan (status, CPU, RAM), dan balasan admin bisa dipantau di tab **Tickets**. Tiket yang dibuat dari tab Tickets juga bisa dikaitkan ke salah satu VM milik mahasiswa.
+
+Setiap VM punya **CCDID**, mis. `CCD-0007`, yaitu nomor yang unik di seluruh dashboard. Mahasiswa melihat CCDID, bukan VMID, karena VMID hanya unik di dalam satu Proxmox: dua Proxmox bisa sama-sama punya VM 101. Admin melihat VMID dan CCDID di daftar VM, dan di tiket juga host-nya. CCDID tidak dipakai ulang. VM yang dihapus lalu dibuat lagi dengan VMID sama mendapat CCDID baru.
 
 ### Connect dari smartphone atau tablet
 Saat Connect pertama kali dari perangkat sentuh, dashboard mengaktifkan input "Text input" di Guacamole: kolom teks muncul di bawah layar, dan mengetuknya membuka keyboard HP. Untuk mengganti cara input, geser jari dari tepi kiri layar ke kanan untuk membuka menu Guacamole, lalu pilih di bagian **Input method**:

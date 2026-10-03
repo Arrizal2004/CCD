@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchProxmoxVmDetail, fetchProxmoxVmIp, enableProxmoxGuestAgent, getVmCreds, revealVmPassword } from '../api';
 import { cloudInitDefaults } from '../proxmoxCloudInit';
-import { formatBytes, formatUptime } from '../format';
+import { formatBytes, formatUptime, formatCcdId } from '../format';
 import ProxmoxAssignmentsPanel from './ProxmoxAssignmentsPanel';
 import ProxmoxVmHistoryChart from './ProxmoxVmHistoryChart';
 import SshCredModal from './SshCredModal';
 import VmDeletePanel from './VmDeletePanel';
+import { CreateTicketModal } from './TicketsPage';
 
 const OS_TYPE_LABEL = {
     l26: 'Linux (2.6+ kernel)', l24: 'Linux (2.4 kernel)',
@@ -79,7 +80,7 @@ function currentRole() {
     try { return JSON.parse(localStorage.getItem('hv_user'))?.role; } catch { return null; }
 }
 
-export default function ProxmoxVmDetailModal({ instance, node, vmid, maskHost = false, onClose, onDeleted }) {
+export default function ProxmoxVmDetailModal({ instance, node, vmid, ccdId = null, maskHost = false, onClose, onDeleted }) {
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -89,6 +90,8 @@ export default function ProxmoxVmDetailModal({ instance, node, vmid, maskHost = 
     const [showCreds, setShowCreds] = useState(false);
     const [creds, setCreds] = useState(null);      // null = loading, 'none' = not configured
     const [password, setPassword] = useState(null);
+    const [reporting, setReporting] = useState(false);
+    const [reported, setReported] = useState(null);   // nomor tiket yang baru dikirim
     const isAdmin = ['superadmin', 'sysadmin'].includes(currentRole());
 
     function loadCreds() {
@@ -145,13 +148,40 @@ export default function ProxmoxVmDetailModal({ instance, node, vmid, maskHost = 
                     <div>
                         <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{config.name || `VM ${vmid}`}</div>
                         <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                            {maskHost ? '' : `${instance}/${node} · `}VMID {vmid} · {status.qmpstatus === 'running'
+                            {maskHost ? formatCcdId(ccdId) : `${instance}/${node} · VMID ${vmid} · ${formatCcdId(ccdId)}`} · {status.qmpstatus === 'running'
                                 ? <span style={{ color: 'var(--green)' }}>running</span>
                                 : <span style={{ color: 'var(--text3)' }}>{status.qmpstatus || 'unknown'}</span>}
                         </div>
                     </div>
-                    <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text3)', fontSize: 18, cursor: 'pointer' }}>×</button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {data && (
+                            <button onClick={() => { setReported(null); setReporting(true); }} title="Buat tiket Helpdesk untuk VM ini"
+                                style={{ padding: '4px 10px', fontSize: 11, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--yellow)', color: 'var(--yellow)', whiteSpace: 'nowrap' }}>
+                                Laporkan masalah
+                            </button>
+                        )}
+                        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text3)', fontSize: 18, cursor: 'pointer' }}>×</button>
+                    </div>
                 </div>
+
+                {reported && (
+                    <div style={{ background: '#4ade8012', border: '1px solid #4ade8055', borderRadius: 6, padding: '6px 10px', color: '#4ade80', fontSize: 11, marginBottom: 12 }}>
+                        ✓ Tiket {reported} terkirim. Pantau balasan admin di menu Helpdesk.
+                    </div>
+                )}
+
+                {reporting && (
+                    <CreateTicketModal
+                        vm={{
+                            vm_id: String(vmid), host_name: `${instance}__${node}`, ccd_id: ccdId, vm_name: config.name || `VM ${vmid}`,
+                            state: status.qmpstatus, cpu_usage_percent: status.cpu != null ? status.cpu * 100 : null,
+                            memory_assigned_mb: status.maxmem ? Math.round(status.maxmem / 1048576) : null,
+                            processor_count: status.cpus ?? null,
+                        }}
+                        onClose={() => setReporting(false)}
+                        onCreated={(t) => { setReporting(false); setReported(t?.ticket_number || 'baru'); }}
+                    />
+                )}
 
                 <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--border)' }}>
                     {[{ id: 'info', label: 'Info' }, { id: 'history', label: 'History' }, { id: 'assignments', label: 'Assignments' }].map(t => (

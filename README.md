@@ -10,7 +10,7 @@ Mahasiswa login, melihat VM yang ditugaskan kepadanya, lalu klik **Connect**. Se
 - Akses per VM atau per group. Mahasiswa hanya melihat VM miliknya, tanpa nama host Proxmox.
 - Membuat VM dari template (clone dan cloud-init), snapshot dan rollback oleh mahasiswa, dan resize RAM, CPU, serta storage oleh admin. Resize hanya saat VM mati, dan storage hanya bisa diperbesar.
 - Open Web: membuka aplikasi web yang berjalan di VM dari dalam dashboard. Alamat privat dimuat lewat proxy dashboard.
-- Tiket helpdesk dan permintaan VM.
+- Tiket helpdesk, termasuk laporan langsung dari Detail VM, dan permintaan VM.
 - Tampilan dashboard dan Connect bisa dipakai dari smartphone dan tablet.
 - SSH dari terminal sendiri (opsional): lewat bastion di VPS dengan SSH key, hanya ke VM milik pengguna. Bisa untuk `scp`, `sftp`, dan VS Code Remote-SSH.
 - Audit & Remote: activity log, sesi remote yang aktif, sesi Open Web yang bisa dicabut admin, dan riwayat SSH lewat bastion (siapa, dari IP mana, ke VM mana).

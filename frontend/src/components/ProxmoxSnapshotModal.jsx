@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchProxmoxSnapshots, createProxmoxSnapshot, deleteProxmoxSnapshot, rollbackProxmoxSnapshot } from '../api';
+import { formatCcdId } from '../format';
 
-export default function ProxmoxSnapshotModal({ instance, node, vmid, vmName, canDelete = true, maskHost = false, onClose }) {
+export default function ProxmoxSnapshotModal({ instance, node, vmid, vmName, ccdId = null, canDelete = true, maskHost = false, onClose }) {
     const [snapshots, setSnapshots] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -72,7 +73,7 @@ export default function ProxmoxSnapshotModal({ instance, node, vmid, vmName, can
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                     <div>
                         <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Snapshots — {vmName || vmid}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>{maskHost ? '' : `Node ${node} · `}VMID {vmid}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>{maskHost ? formatCcdId(ccdId) : `Node ${node} · VMID ${vmid} · ${formatCcdId(ccdId)}`}</div>
                     </div>
                     <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text3)', fontSize: 18, cursor: 'pointer' }}>×</button>
                 </div>

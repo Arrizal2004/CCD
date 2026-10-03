@@ -26,3 +26,8 @@ export function formatDurationMs(ms) {
     const mm = String(m).padStart(2, '0'), ss = String(sec).padStart(2, '0');
     return h ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
 }
+
+// CCDID: nomor VM yang unik di seluruh dashboard (VMID hanya unik per Proxmox). 7 → "CCD-0007".
+export function formatCcdId(id) {
+    return id == null ? '—' : `CCD-${String(id).padStart(4, '0')}`;
+}

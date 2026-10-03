@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Network, DataSet } from 'vis-network/standalone';
 import { fetchProxmoxInstances, fetchProxmoxNodes, fetchProxmoxVms, fetchMyProxmoxVms, fetchProxmoxVmDetail } from '../api';
-import { formatBytes } from '../format';
+import { formatBytes, formatCcdId } from '../format';
 
 function parseBridge(config) {
     const netKey = Object.keys(config).find(k => /^net\d+$/.test(k));
@@ -50,7 +50,7 @@ export default function ProxmoxTopology({ currentUser }) {
                         id: vmId, label: vm.name || String(vm.vmid), shape: 'dot', size: 16,
                         color: { background: color, border: color },
                         font: { color, size: 10, face: 'JetBrains Mono' },
-                        _raw: { type: 'vm', vmid: vm.vmid, name: vm.name, status: vm.status, cpus: vm.cpus, maxmem: vm.maxmem },
+                        _raw: { type: 'vm', vmid: vm.vmid, ccd_id: vm.ccd_id, name: vm.name, status: vm.status, cpus: vm.cpus, maxmem: vm.maxmem },
                     });
                     edges.add({ from: rootId, to: vmId, color: { color: '#1e2d47' }, width: 1 });
                 }
@@ -87,7 +87,7 @@ export default function ProxmoxTopology({ currentUser }) {
                             id: vmId, label: vm.name || String(vm.vmid), shape: 'dot', size: 16,
                             color: { background: color, border: color },
                             font: { color, size: 10, face: 'JetBrains Mono' },
-                            _raw: { type: 'vm', instance: inst.label, node: n.node, vmid: vm.vmid, name: vm.name, status: vm.status, cpus: vm.cpus, maxmem: vm.maxmem },
+                            _raw: { type: 'vm', instance: inst.label, node: n.node, vmid: vm.vmid, ccd_id: vm.ccd_id, name: vm.name, status: vm.status, cpus: vm.cpus, maxmem: vm.maxmem },
                         });
 
                         let bridge = null;
@@ -184,7 +184,7 @@ export default function ProxmoxTopology({ currentUser }) {
                     )}
                     {selected.type === 'vm' && (
                         <div style={{ fontSize: 11, color: 'var(--text2)', display: 'flex', flexDirection: 'column', gap: 3 }}>
-                            <div>{selected.instance ? `${selected.instance}/${selected.node} · ` : ''}VMID {selected.vmid}</div>
+                            <div>{selected.instance ? `${selected.instance}/${selected.node} · VMID ${selected.vmid} · ` : ''}CCDID {formatCcdId(selected.ccd_id)}</div>
                             <div>Status: <span style={{ color: STATUS_COLOR[selected.status] }}>{selected.status}</span></div>
                             <div>vCPU: {selected.cpus}</div>
                             <div>Memory: {formatBytes(selected.maxmem)}</div>
