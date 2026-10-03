@@ -116,6 +116,17 @@ export default function ProxmoxPage({ currentUser }) {
 
     useEffect(() => { loadInstances(); }, [loadInstances]);
 
+    // Ganti instance: kosongkan node dulu. Kalau tidak, daftar VM sempat diminta dengan instance baru
+    // dan node instance lama (mis. Proxmox1 + node milik Proxmox2), yang ditolak Proxmox.
+    const selectInstance = (label) => {
+        if (label === selectedInstance) return;
+        setSelectedInstance(label);
+        setSelectedNode(null);
+        setNodes([]);
+        setVms([]);
+        setLoading(true);
+    };
+
     useEffect(() => { loadNodes(selectedInstance); }, [selectedInstance, loadNodes]);
 
     useEffect(() => {
@@ -278,7 +289,7 @@ export default function ProxmoxPage({ currentUser }) {
                     {instances.length > 1 && (
                         <div style={{ display: 'flex', gap: 6 }}>
                             {instances.map(inst => (
-                                <button key={inst.label} onClick={() => setSelectedInstance(inst.label)}
+                                <button key={inst.label} onClick={() => selectInstance(inst.label)}
                                     style={{
                                         padding: '6px 12px', fontSize: 11, borderRadius: 6, cursor: 'pointer',
                                         background: selectedInstance === inst.label ? 'var(--purple-glow)' : 'var(--bg-card)',
