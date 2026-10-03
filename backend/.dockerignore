@@ -1,0 +1,8 @@
+# Secret dan data pengguna tidak boleh ikut masuk image (diberikan saat runtime lewat
+# env_file dan volume ./static).
+.env
+static/uploads/
+__pycache__/
+*.pyc
+# Image bastion dibangun terpisah.
+bastion/

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { changePassword } from '../api';
+import { changePassword, fetchSshConfig } from '../api';
+import SshKeysSection from './SshKeysSection';
 
 const ROLE_COLOR = {
     superadmin: 'var(--red)',
@@ -57,6 +58,8 @@ export default function ProfileModal({ user, onClose }) {
     const [confPw, setConfPw] = useState('');
     const [status, setStatus] = useState(null);  // { type: 'success'|'error', msg }
     const [loading, setLoading] = useState(false);
+    const [sshEnabled, setSshEnabled] = useState(false);
+    useEffect(() => { fetchSshConfig().then(c => setSshEnabled(!!c.enabled)); }, []);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -98,7 +101,7 @@ export default function ProfileModal({ user, onClose }) {
                     background: 'var(--bg-card)', border: '1px solid var(--border)',
                     borderRadius: 12, width: '100%', maxWidth: 420,
                     boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
-                    overflow: 'hidden',
+                    maxHeight: '90vh', overflowY: 'auto',
                 }}
             >
                 {/* Header */}
@@ -194,6 +197,8 @@ export default function ProfileModal({ user, onClose }) {
                         {loading ? 'Menyimpan…' : 'Simpan Password Baru'}
                     </button>
                 </form>
+
+                {sshEnabled && <SshKeysSection />}
             </div>
         </div>,
         document.body

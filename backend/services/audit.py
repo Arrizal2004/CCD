@@ -46,12 +46,14 @@ async def log_activity(
     target: Optional[dict] = None,
     detail: str = "",
     request=None,
+    ip: Optional[str] = None,
 ) -> None:
     """
     Rekam satu event audit. Tidak pernah raise.
       user   : dict JWT ({sub, username, role}) atau None
       action : action_type, mis. 'AUTH_LOGIN', 'VM_POWER', 'CRED_UPDATE'
       target : {"id": vm_id/host, "name": vm_name/host_name}
+      ip     : IP klien kalau bukan dari request (mis. login SSH yang dilaporkan bastion)
     """
     try:
         sev = severity if severity in SEVERITIES else "INFO"
@@ -66,7 +68,7 @@ async def log_activity(
             role = user.get("role")
         tgt_id = (target or {}).get("id")
         tgt_name = (target or {}).get("name")
-        ip = _client_ip(request)
+        ip = ip if ip is not None else _client_ip(request)
 
         pool = await get_pool()
         async with pool.acquire() as conn:

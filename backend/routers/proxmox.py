@@ -312,8 +312,9 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
         visible = {vid for vid, _ in await get_student_vm_ids(int(user["sub"]), host_key)}
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT vm_id, ssh_host FROM vm_credentials WHERE host_name = $1", host_key)
+        rows = await conn.fetch("SELECT vm_id, ssh_host, ssh_port FROM vm_credentials WHERE host_name = $1", host_key)
     manual = {r["vm_id"]: r["ssh_host"] for r in rows if r["ssh_host"]}
+    ssh_ports = {r["vm_id"]: r["ssh_port"] for r in rows if r["ssh_host"]}
     if user.get("role") not in _ADMIN_ROLES:
         vms = [vm for vm in vms if str(vm["vmid"]) in visible]
     running = [vm["vmid"] for vm in vms if vm.get("status") == "running" and str(vm["vmid"]) in visible]
@@ -323,6 +324,7 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
         if vid in visible:
             vm["ip"] = agent.get(vid)
             vm["manual_ip"] = manual.get(vid)
+            vm["ssh_port"] = ssh_ports.get(vid)
     return vms
 
 

@@ -117,3 +117,46 @@ select {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* ── Layar kecil (smartphone) ─────────────────────────────────────────────
+   Komponen memakai inline style, jadi aturan di sini memakai !important.
+   Desktop tidak terpengaruh. */
+.ccd-show-mobile { display: none; }
+
+@media (max-width: 640px) {
+    .ccd-hide-mobile { display: none !important; }
+    .ccd-show-mobile { display: inline !important; }
+
+    .ccd-topbar { padding: 0 12px !important; }
+
+    /* Tab digeser ke samping, bukan dilipat atau meluber keluar layar. */
+    .ccd-navbar {
+        padding: 0 4px !important;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    .ccd-navbar::-webkit-scrollbar { display: none; }
+    .ccd-tab { padding: 11px 12px !important; }
+
+    /* Tabel yang lebih lebar dari layar digeser di dalam kotaknya sendiri. */
+    div:has(> table) { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
+    table th, table td { white-space: nowrap; }
+    table td[colspan] { white-space: normal; }
+    /* Tabel memakai lebar alaminya (digeser), bukan dipaksa selebar layar sampai
+       tombol-tombol aksinya menumpuk ke bawah. */
+    div:has(> table) > table { width: max-content !important; min-width: 100%; }
+
+    /* Dua kolom bersebelahan ditumpuk menjadi satu kolom. */
+    .ccd-stack-mobile { grid-template-columns: minmax(0, 1fr) !important; }
+
+    /* Baris form dilipat; kolom isian memakai lebar penuh. */
+    .ccd-wrap-mobile { flex-wrap: wrap !important; }
+    .ccd-wrap-mobile > input { flex: 1 1 100% !important; }
+
+    /* Deretan kartu statistik dilipat menjadi beberapa baris. */
+    .ccd-stat-grid { grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)) !important; }
+
+    /* iOS memperbesar halaman saat input bertulisan kecil disentuh. */
+    input, select, textarea { font-size: 16px !important; }
+}

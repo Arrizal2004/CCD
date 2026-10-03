@@ -190,7 +190,7 @@ export default function ProxmoxVmDetailModal({ instance, node, vmid, maskHost = 
                 )}
 
                 {tab === 'info' && data && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                    <div className="ccd-stack-mobile" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                         <div>
                             <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>General</div>
                             <Row label="Guest IP" value={ipLabel(ipInfo)} />

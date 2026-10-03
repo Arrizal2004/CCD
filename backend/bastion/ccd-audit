@@ -1,0 +1,56 @@
+#!/bin/sh
+# Membaca log sshd dari syslogd. Semua baris diteruskan ke stdout container (docker logs), dan
+# baris yang dibutuhkan audit (login, VM tujuan, penolakan, logout) dikirim ke backend CCD.
+# Pengiriman dikumpulkan dulu (maks. 1 detik atau 50 baris) supaya pembacaan log tidak tertahan.
+# Kalau backend belum siap (mis. baru restart), baris disimpan dan dikirim ulang tiap detik.
+URL=http://backend:8000/api/v1/ssh-keys/events
+buf=""
+n=0
+failed=0
+
+flush() {
+    [ "$n" -gt 0 ] || return 0
+    if printf '%s' "$buf" | curl -fs --max-time 5 -H @/etc/ssh/bastion-header \
+        -H 'Content-Type: text/plain' --data-binary @- "$URL" >/dev/null; then
+        [ "$failed" = 0 ] || echo "ccd-audit: backend tersambung lagi, $n baris audit terkirim" >&2
+        buf=""; n=0; failed=0
+        return 0
+    fi
+    [ "$failed" = 1 ] || echo "ccd-audit: backend belum bisa dihubungi, baris audit ditahan" >&2
+    failed=1
+    if [ "$n" -ge 500 ]; then
+        echo "ccd-audit: $n baris audit dibuang karena backend tidak bisa dihubungi" >&2
+        buf=""; n=0
+    fi
+}
+
+while :; do
+    if ! IFS= read -r -t 1 line; then
+        # Tidak ada baris baru selama 1 detik, atau syslogd berhenti (busybox tidak membedakan).
+        flush
+        pidof syslogd >/dev/null || exit 0
+        continue
+    fi
+    printf '%s\n' "$line"
+    # Dicocokkan dari awal pesan (setelah "sshd-session[pid]: "), jadi teks kiriman klien di baris
+    # lain, mis. nama user pada "Invalid user ...", tidak ikut terkirim. Backend memvalidasi ulang.
+    case "${line#*]: }" in
+        "Accepted publickey for tunnel from "* | "User child is on pid "* | \
+        "debug1: serverloop.c:server_request_direct_tcpip():"* | \
+        "Received request from "*", but the request was denied." | \
+        "Transferred: sent "* | "Closing connection to "* | \
+        "Connection closed by user tunnel "* | "Connection reset by user tunnel "* | \
+        "Disconnected from user tunnel "* | "Timeout, client not responding from user tunnel "* | \
+        "Connection from user tunnel "* | *": Connection from user tunnel "* | \
+        "Server listening on "*)
+            buf="$buf$line
+"
+            n=$((n + 1))
+            [ "$n" -lt 50 ] || flush
+            ;;
+        *)
+            # Baris lain: kirim yang tertahan sekarang, kecuali backend sedang gagal (tunggu jeda 1 detik).
+            [ "$failed" = 1 ] || flush
+            ;;
+    esac
+done

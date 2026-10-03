@@ -91,6 +91,18 @@ check_docker() {
 }
 
 gen_secret()   { openssl rand -hex 32; }
+
+# Token bastion SSH juga ditambahkan ke .env lama, supaya bastion tinggal diaktifkan
+# dengan COMPOSE_PROFILES=ssh tanpa langkah manual lain.
+ensure_bastion_token() {
+    local env_file="$1"
+    grep -qE '^BASTION_TOKEN=.+' "$env_file" && return
+    if grep -q '^BASTION_TOKEN=' "$env_file"; then
+        sed -i "s#^BASTION_TOKEN=.*#BASTION_TOKEN=$(gen_secret)#" "$env_file"
+    else
+        printf '\nBASTION_TOKEN=%s\n' "$(gen_secret)" >> "$env_file"
+    fi
+}
 gen_password() { openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | cut -c1-20; }
 
 GENERATED_GUAC_PASS=""
@@ -104,6 +116,7 @@ setup_env() {
 
     if [ -f "$env_file" ]; then
         log "backend/.env sudah ada — dipakai apa adanya (tidak ditimpa)."
+        ensure_bastion_token "$env_file"
         return
     fi
     if [ ! -f "$BACKEND_DIR/.env.example" ]; then
@@ -128,6 +141,7 @@ setup_env() {
     admin_pass="$(gen_password)"
     sed -i "s#^INITIAL_ADMIN_PASSWORD=.*#INITIAL_ADMIN_PASSWORD=${admin_pass}#" "$env_file"
     sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=$(openssl rand -hex 24)#" "$env_file"
+    ensure_bastion_token "$env_file"
     sed -i "s#^GUAC_DB_PASSWORD=.*#GUAC_DB_PASSWORD=$(openssl rand -hex 24)#"   "$env_file"
     chmod 600 "$env_file"
 
@@ -158,8 +172,15 @@ deploy() {
     (cd "$BACKEND_DIR" && "${COMPOSE[@]}" build backend)
     log "Membangun image frontend (npm ci + vite build)..."
     (cd "$BACKEND_DIR" && "${COMPOSE[@]}" build frontend)
+    if $SUDO grep -qE '^COMPOSE_PROFILES=.*\bssh\b' "$BACKEND_DIR/.env" 2>/dev/null; then
+        log "Membangun image bastion SSH..."
+        (cd "$BACKEND_DIR" && "${COMPOSE[@]}" build bastion)
+    fi
     log "Menjalankan semua container (menunggu database dan Guacamole siap)..."
     (cd "$BACKEND_DIR" && "${COMPOSE[@]}" up -d)
+    # nginx di frontend mengingat IP backend saat start. Restart supaya tetap benar setelah
+    # backend dibuat ulang saat update.
+    (cd "$BACKEND_DIR" && "${COMPOSE[@]}" restart frontend)
 }
 
 wait_healthy() {

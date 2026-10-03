@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     fetchProxmoxInstances, fetchProxmoxNodes, fetchProxmoxVms, fetchMyProxmoxVms, proxmoxVmAction,
-    getGuacUrl, appendGuacToken, fetchProxmoxVmIp, fetchMyAssignedVmids, fetchProxmoxVmDetail,
+    getGuacUrl, appendGuacToken, applyGuacTouchInputDefault, fetchSshConfig, fetchProxmoxVmIp, fetchMyAssignedVmids, fetchProxmoxVmDetail,
 } from '../api';
 import { formatBytes, formatUptime } from '../format';
 import ProxmoxSnapshotModal from '../components/ProxmoxSnapshotModal';
@@ -12,6 +12,8 @@ import HostPerformancePanel from '../components/HostPerformancePanel';
 import CreateVmModal from '../components/CreateVmModal';
 import ProxmoxResizeModal from '../components/ProxmoxResizeModal';
 import { cloudInitDefaults } from '../proxmoxCloudInit';
+import useIsMobile from '../useIsMobile';
+import SshCommandModal from '../components/SshCommandModal';
 
 const STATUS_COLOR = {
     running: 'var(--green)',
@@ -64,6 +66,10 @@ export default function ProxmoxPage({ currentUser }) {
     const [connecting, setConnecting] = useState(null);    // vmid sedang proses connect
 
     const canControl = ['superadmin', 'sysadmin'].includes(currentUser?.role);
+    const isMobile = useIsMobile();
+    const [sshCfg, setSshCfg] = useState(null);     // konfigurasi bastion SSH (null = belum dimuat)
+    const [sshVm, setSshVm] = useState(null);       // vm yang sedang dibuka modal perintah SSH-nya
+    useEffect(() => { fetchSshConfig().then(setSshCfg); }, []);
     const [myVmids, setMyVmids] = useState([]); // VMID (string) yang di-assign ke user student ini
 
     const canControlVm = useCallback((vmid) => canControl || myVmids.includes(String(vmid)), [canControl, myVmids]);
@@ -171,6 +177,7 @@ export default function ProxmoxPage({ currentUser }) {
         try {
             const c = ctx(vm);
             const res = await getGuacUrl(`${c.instance}__${c.node}`, String(vm.vmid));
+            applyGuacTouchInputDefault();
             window.open(appendGuacToken(res.url), '_blank');
         } catch (e) {
             const detail = e?.response?.data?.detail || '';
@@ -191,6 +198,52 @@ export default function ProxmoxPage({ currentUser }) {
     };
 
     const runningCount = vms.filter(v => v.status === 'running').length;
+
+    // Tombol aksi per VM, dipakai tabel (desktop) dan kartu (HP). Di HP tombol dibuat lebih besar
+    // supaya mudah disentuh.
+    const btnSize = isMobile ? { padding: '8px 14px', fontSize: 13 } : { padding: '4px 10px', fontSize: 10 };
+    const renderActions = (vm) => (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {canControlVm(vm.vmid) && (ACTIONS_BY_STATUS[vm.status] || []).map(a => (
+                    <button key={a.action}
+                        disabled={pendingAction === vm.vmid}
+                        onClick={() => handleAction(vm.vmid, a.action)}
+                        style={{
+                            ...btnSize, borderRadius: 5, cursor: pendingAction === vm.vmid ? 'wait' : 'pointer',
+                            background: 'transparent', border: `1px solid var(--${a.accent})`, color: `var(--${a.accent})`,
+                            opacity: pendingAction === vm.vmid ? 0.5 : 1,
+                        }}>
+                        {pendingAction === vm.vmid ? '…' : a.label}
+                    </button>
+                ))}
+                {canControl && (
+                    <button disabled={vm.status !== 'stopped'} onClick={() => setResizeVm(vm)}
+                        title={vm.status !== 'stopped' ? 'Matikan VM dulu untuk mengubah RAM/CPU/storage' : 'Ubah RAM, CPU, storage'}
+                        style={{ ...btnSize, borderRadius: 5, cursor: vm.status !== 'stopped' ? 'not-allowed' : 'pointer', background: 'transparent', border: '1px solid var(--yellow)', color: 'var(--yellow)', opacity: vm.status !== 'stopped' ? 0.4 : 1 }}>
+                        Resize
+                    </button>
+                )}
+                {canControlVm(vm.vmid) && (
+                    <button onClick={() => setSnapshotVm(vm)}
+                        style={{ ...btnSize, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--purple)', color: 'var(--purple)' }}>
+                        Snapshots
+                    </button>
+                )}
+                {vm.status === 'running' && (
+                    <button disabled={connecting === vm.vmid} onClick={() => doConnect(vm)}
+                        style={{ ...btnSize, borderRadius: 5, cursor: connecting === vm.vmid ? 'wait' : 'pointer', background: 'transparent', border: '1px solid var(--cyan)', color: 'var(--cyan)', opacity: connecting === vm.vmid ? 0.5 : 1 }}>
+                        {connecting === vm.vmid ? '…' : 'Connect'}
+                    </button>
+                )}
+                {sshCfg?.enabled && vm.status === 'running' && vm.manual_ip && canControlVm(vm.vmid) && (
+                    <button onClick={() => setSshVm(vm)} title="Perintah SSH lewat bastion"
+                        style={{ ...btnSize, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--green)', color: 'var(--green)' }}>
+                        SSH
+                    </button>
+                )}
+                {!canControlVm(vm.vmid) && vm.status !== 'running' && <span style={{ color: 'var(--text3)' }}>—</span>}
+            </div>
+    );
 
     return (
         <div style={{ padding: '14px 20px', maxWidth: 1400, margin: '0 auto' }}>
@@ -278,6 +331,37 @@ export default function ProxmoxPage({ currentUser }) {
                         </button>
                     </div>}
                 </div>
+            ) : isMobile ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {loading && <div style={{ padding: 20, textAlign: 'center', color: 'var(--text3)' }}>Loading…</div>}
+                {!loading && vms.length === 0 && (
+                    <div style={{ padding: 20, textAlign: 'center', color: 'var(--text3)', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}>
+                        {canControl ? 'Belum ada VM di node ini. Buat VM/template di Proxmox terlebih dahulu.' : 'Belum ada VM yang ditugaskan kepada Anda.'}
+                    </div>
+                )}
+                {!loading && vms.map(vm => (
+                    <div key={vm.vmid} style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                            <button onClick={() => setDetailVm(vm)}
+                                style={{ background: 'transparent', border: 'none', padding: 0, textAlign: 'left', color: 'var(--text)', cursor: 'pointer', minWidth: 0 }}>
+                                <div style={{ fontSize: 15, fontWeight: 600, overflowWrap: 'anywhere', textDecoration: 'underline', textDecorationColor: 'var(--border-light)' }}>{vm.name || '—'}</div>
+                                <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'var(--fmono)', marginTop: 2 }}>VMID {vm.vmid}</div>
+                            </button>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontSize: 12, color: STATUS_COLOR[vm.status] || 'var(--text3)' }}>
+                                <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'currentColor' }} />
+                                {vm.status}
+                            </span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '6px 12px', fontSize: 12, fontFamily: 'var(--fmono)', color: 'var(--text2)' }}>
+                            <div><span style={{ color: 'var(--text3)' }}>IP </span>{vm.ip || vm.manual_ip || '—'}</div>
+                            <div><span style={{ color: 'var(--text3)' }}>CPU </span>{vm.cpus ? `${vm.cpus} vCPU` : '—'}{vm.cpu != null && vm.status === 'running' ? ` (${(vm.cpu * 100).toFixed(0)}%)` : ''}</div>
+                            <div><span style={{ color: 'var(--text3)' }}>RAM </span>{formatBytes(vm.mem)} / {formatBytes(vm.maxmem)}</div>
+                            <div><span style={{ color: 'var(--text3)' }}>Uptime </span>{vm.status === 'running' ? formatUptime(vm.uptime) : '—'}</div>
+                        </div>
+                        {renderActions(vm)}
+                    </div>
+                ))}
+            </div>
             ) : (
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -327,46 +411,17 @@ export default function ProxmoxPage({ currentUser }) {
                                     {vm.status === 'running' ? formatUptime(vm.uptime) : '—'}
                                 </td>
                                 <td style={{ padding: '8px 12px' }}>
-                                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                        {canControlVm(vm.vmid) && (ACTIONS_BY_STATUS[vm.status] || []).map(a => (
-                                            <button key={a.action}
-                                                disabled={pendingAction === vm.vmid}
-                                                onClick={() => handleAction(vm.vmid, a.action)}
-                                                style={{
-                                                    padding: '4px 10px', fontSize: 10, borderRadius: 5, cursor: pendingAction === vm.vmid ? 'wait' : 'pointer',
-                                                    background: 'transparent', border: `1px solid var(--${a.accent})`, color: `var(--${a.accent})`,
-                                                    opacity: pendingAction === vm.vmid ? 0.5 : 1,
-                                                }}>
-                                                {pendingAction === vm.vmid ? '…' : a.label}
-                                            </button>
-                                        ))}
-                                        {canControl && (
-                                            <button disabled={vm.status !== 'stopped'} onClick={() => setResizeVm(vm)}
-                                                title={vm.status !== 'stopped' ? 'Matikan VM dulu untuk mengubah RAM/CPU/storage' : 'Ubah RAM, CPU, storage'}
-                                                style={{ padding: '4px 10px', fontSize: 10, borderRadius: 5, cursor: vm.status !== 'stopped' ? 'not-allowed' : 'pointer', background: 'transparent', border: '1px solid var(--yellow)', color: 'var(--yellow)', opacity: vm.status !== 'stopped' ? 0.4 : 1 }}>
-                                                Resize
-                                            </button>
-                                        )}
-                                        {canControlVm(vm.vmid) && (
-                                            <button onClick={() => setSnapshotVm(vm)}
-                                                style={{ padding: '4px 10px', fontSize: 10, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--purple)', color: 'var(--purple)' }}>
-                                                Snapshots
-                                            </button>
-                                        )}
-                                        {vm.status === 'running' && (
-                                            <button disabled={connecting === vm.vmid} onClick={() => doConnect(vm)}
-                                                style={{ padding: '4px 10px', fontSize: 10, borderRadius: 5, cursor: connecting === vm.vmid ? 'wait' : 'pointer', background: 'transparent', border: '1px solid var(--cyan)', color: 'var(--cyan)', opacity: connecting === vm.vmid ? 0.5 : 1 }}>
-                                                {connecting === vm.vmid ? '…' : 'Connect'}
-                                            </button>
-                                        )}
-                                        {!canControlVm(vm.vmid) && vm.status !== 'running' && <span style={{ color: 'var(--text3)' }}>—</span>}
-                                    </div>
+                                    {renderActions(vm)}
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
+            )}
+
+            {sshVm && sshCfg && (
+                <SshCommandModal vm={sshVm} cfg={sshCfg} onClose={() => setSshVm(null)} />
             )}
 
             {resizeVm && (

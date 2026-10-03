@@ -67,6 +67,31 @@ export const appendGuacToken = (url) => {
     const hashIdx = url.indexOf('#');
     return url.slice(0, hashIdx + 1) + url.slice(hashIdx + 1) + '?token=' + encodeURIComponent(tok);
 };
+/**
+ * Di perangkat sentuh tidak ada keyboard fisik, sedangkan input bawaan Guacamole adalah "none",
+ * sehingga keyboard HP tidak pernah muncul. Sekali per perangkat, aktifkan "Text input" di
+ * preferensi Guacamole (localStorage yang sama, karena Guacamole dilayani di origin yang sama).
+ * Setelah itu pilihan pengguna di menu Guacamole tidak diubah lagi.
+ */
+const GUAC_PREFS_KEY = 'GUAC_PREFERENCES';
+const GUAC_TOUCH_DEFAULT_APPLIED = 'ccd_guac_touch_input_applied';
+export const applyGuacTouchInputDefault = () => {
+    try {
+        if (!window.matchMedia('(pointer: coarse)').matches) return;
+        if (localStorage.getItem(GUAC_TOUCH_DEFAULT_APPLIED)) return;
+        let prefs = {};
+        try { prefs = JSON.parse(localStorage.getItem(GUAC_PREFS_KEY)) || {}; } catch { prefs = {}; }
+        if (typeof prefs !== 'object' || Array.isArray(prefs)) prefs = {};
+        if (!prefs.inputMethod || prefs.inputMethod === 'none') {
+            localStorage.setItem(GUAC_PREFS_KEY, JSON.stringify({ ...prefs, inputMethod: 'text' }));
+        }
+        localStorage.setItem(GUAC_TOUCH_DEFAULT_APPLIED, '1');
+    } catch { /* localStorage tidak tersedia: biarkan bawaan Guacamole */ }
+};
+export const fetchSshConfig = () => api.get('/api/v1/ssh-keys/config').then(r => r.data).catch(() => ({ enabled: false }));
+export const fetchSshKeys   = () => api.get('/api/v1/ssh-keys').then(r => r.data);
+export const addSshKey      = (body) => api.post('/api/v1/ssh-keys', body).then(r => r.data);
+export const deleteSshKey   = (id) => api.delete(`/api/v1/ssh-keys/${id}`).then(r => r.data);
 export const fetchAllProxmoxVms = () => api.get('/api/v1/proxmox/all-vms').then(r => r.data);
 export const changePassword = (old_password, new_password) =>
     api.post('/api/v1/users/me/change-password', { old_password, new_password }).then(r => r.data);
@@ -383,3 +408,7 @@ export const fetchOpenWebHistory = (page = 1, page_size = 50) =>
     api.get('/api/admin/openweb/history', { params: { page, page_size } }).then(r => r.data).catch(() => ({ total: 0, items: [] }));
 export const killOpenWebSession = (session_id) =>
     api.post('/api/admin/openweb/kill', { session_id }).then(r => r.data);
+export const fetchSshSessions = () =>
+    api.get('/api/admin/ssh/sessions').then(r => r.data).catch(() => ({ sessions: [] }));
+export const fetchSshHistory = (page = 1, page_size = 50) =>
+    api.get('/api/admin/ssh/history', { params: { page, page_size } }).then(r => r.data).catch(() => ({ total: 0, items: [] }));

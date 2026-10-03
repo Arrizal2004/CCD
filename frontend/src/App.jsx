@@ -47,6 +47,10 @@ export default function App() {
         location.pathname === '/instances' ? 'instances' : 'servers';
     const setTab = (tab) => navigate(`/${tab}`);
 
+    useEffect(() => {
+        document.querySelector('.ccd-tab[data-active="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+    }, [activeTab]);
+
     // Student yang belum verified hanya boleh akses /requests
     const isRestrictedStudent = authUser?.role === 'student' && authUser?.is_verified === false;
     useEffect(() => {
@@ -102,17 +106,18 @@ export default function App() {
         <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', flexDirection: 'column' }}>
 
             {/* ── Topbar ── */}
-            <div style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)', padding: '0 20px', height: 46, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 100 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="ccd-topbar" style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)', padding: '0 20px', height: 46, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, position: 'sticky', top: 0, zIndex: 100 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
                     <div style={{ width: 26, height: 26, borderRadius: 6, flexShrink: 0, background: 'linear-gradient(135deg,var(--cyan),var(--blue))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#000' }}>C</div>
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>Campus Cloud Dashboard</span>
+                    <span className="ccd-hide-mobile" style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap' }}>Campus Cloud Dashboard</span>
+                    <span className="ccd-show-mobile" style={{ fontWeight: 600, fontSize: 14 }}>CCD</span>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     {/* About / Tentang Sistem */}
                     <button onClick={() => setShowAbout(true)} title="Tentang Sistem"
                         style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontFamily: 'var(--fmono)', background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer' }}>
-                        ℹ️ Tentang Sistem
+                        ℹ️<span className="ccd-hide-mobile"> Tentang Sistem</span>
                     </button>
 
                     {/* Theme toggle */}
@@ -124,9 +129,9 @@ export default function App() {
                     <button
                         onClick={() => setShowProfile(true)}
                         title="Profil & Ganti Password"
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 6, background: 'var(--bg-hover)', border: '1px solid var(--border)', cursor: 'pointer' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 6, background: 'var(--bg-hover)', border: '1px solid var(--border)', cursor: 'pointer', minWidth: 0 }}
                     >
-                        <span style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--fmono)' }}>
+                        <span className="ccd-hide-mobile" style={{ fontSize: 11, color: 'var(--text2)', fontFamily: 'var(--fmono)', whiteSpace: 'nowrap' }}>
                             {authUser?.full_name || authUser?.username}
                         </span>
                         <span style={{
@@ -145,7 +150,7 @@ export default function App() {
             </div>
 
             {/* ── Navbar tabs ── */}
-            <div style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)', padding: '0 20px', display: 'flex', alignItems: 'center', gap: 2, position: 'sticky', top: 46, zIndex: 99 }}>
+            <div className="ccd-navbar" style={{ background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)', padding: '0 20px', display: 'flex', alignItems: 'center', gap: 2, position: 'sticky', top: 46, zIndex: 99 }}>
                 {(isRestrictedStudent ? [
                     { id: 'requests', label: 'My Requests' },
                 ] : [
@@ -170,8 +175,8 @@ export default function App() {
                     { id: 'tickets',  label: ['superadmin', 'sysadmin'].includes(authUser?.role) ? 'Helpdesk' : 'Tickets' },
                     { id: 'requests', label: ['superadmin', 'sysadmin'].includes(authUser?.role) ? 'Infra Requests' : 'My Requests' },
                 ]).map(tab => (
-                    <button key={tab.id} onClick={() => setTab(tab.id)}
-                        style={{ padding: '8px 16px', fontSize: 12, cursor: 'pointer', background: 'transparent', border: 'none', borderBottom: `2px solid ${activeTab === tab.id ? 'var(--cyan)' : 'transparent'}`, color: activeTab === tab.id ? 'var(--cyan)' : 'var(--text3)', fontWeight: activeTab === tab.id ? 600 : 400, transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button key={tab.id} onClick={() => setTab(tab.id)} className="ccd-tab" data-active={activeTab === tab.id ? 'true' : undefined}
+                        style={{ whiteSpace: 'nowrap', flexShrink: 0, padding: '8px 16px', fontSize: 12, cursor: 'pointer', background: 'transparent', border: 'none', borderBottom: `2px solid ${activeTab === tab.id ? 'var(--cyan)' : 'transparent'}`, color: activeTab === tab.id ? 'var(--cyan)' : 'var(--text3)', fontWeight: activeTab === tab.id ? 600 : 400, transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span>{tab.icon}</span> {tab.label}
                     </button>
                 ))}

@@ -153,3 +153,21 @@ async def openweb_kill(body: OpenWebKillReq, request: Request, user: dict = Depe
         request,
     )
     return {"status": "revoked", "session_id": body.session_id}
+
+
+# ── SSH sessions (bastion) ──────────────────────────────────────────────────
+@router.get("/ssh/sessions")
+async def ssh_active(user: dict = Depends(require_sysadmin)):
+    """Sesi SSH lewat bastion yang masih tersambung."""
+    from services.ssh_audit import list_sessions
+    return {"sessions": (await list_sessions(active_only=True, limit=200))["items"]}
+
+
+@router.get("/ssh/history")
+async def ssh_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    user: dict = Depends(require_sysadmin),
+):
+    from services.ssh_audit import list_sessions
+    return await list_sessions(active_only=False, limit=page_size, offset=(page - 1) * page_size)

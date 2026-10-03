@@ -123,7 +123,7 @@ export default function StatusPage() {
                 </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div className="ccd-stack-mobile" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
 
                 {/* Backend Services */}
                 <SectionCard title="Backend Services">

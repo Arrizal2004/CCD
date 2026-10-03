@@ -1,0 +1,38 @@
+# Bastion SSH Campus Cloud Dashboard: hanya key, tanpa password, tanpa shell, hanya penerusan
+# ke IP:port yang diizinkan CCD (opsi permitopen dari AuthorizedKeysCommand). Log ke syslog
+# (lihat entrypoint.sh), diteruskan ke audit CCD oleh ccd-audit.
+Port 2222
+HostKey /data/ssh_host_ed25519_key
+HostKey /data/ssh_host_rsa_key
+PidFile /run/sshd.pid
+LogLevel VERBOSE
+# Satu baris debug yang dibutuhkan audit: IP:port tujuan setiap penerusan (ssh -J / -W).
+LogVerbose serverloop.c:server_request_direct_tcpip():*
+UseDNS no
+
+PermitRootLogin no
+AllowUsers tunnel
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+AuthorizedKeysFile none
+AuthorizedKeysCommand /usr/local/bin/ccd-keys %u %f %C
+AuthorizedKeysCommandUser ccdkeys
+
+AllowTcpForwarding local
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+X11Forwarding no
+PermitTunnel no
+GatewayPorts no
+PermitTTY no
+PermitUserEnvironment no
+PermitUserRC no
+
+MaxAuthTries 3
+MaxSessions 10
+MaxStartups 10:30:60
+LoginGraceTime 20
+ClientAliveInterval 60
+ClientAliveCountMax 3

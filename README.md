@@ -11,7 +11,9 @@ Mahasiswa login, melihat VM yang ditugaskan kepadanya, lalu klik **Connect**. Se
 - Membuat VM dari template (clone dan cloud-init), snapshot dan rollback oleh mahasiswa, dan resize RAM, CPU, serta storage oleh admin. Resize hanya saat VM mati, dan storage hanya bisa diperbesar.
 - Open Web: membuka aplikasi web yang berjalan di VM dari dalam dashboard. Alamat privat dimuat lewat proxy dashboard.
 - Tiket helpdesk dan permintaan VM.
-- Audit & Remote: activity log, sesi remote yang aktif, dan sesi Open Web yang bisa dicabut admin.
+- Tampilan dashboard dan Connect bisa dipakai dari smartphone dan tablet.
+- SSH dari terminal sendiri (opsional): lewat bastion di VPS dengan SSH key, hanya ke VM milik pengguna. Bisa untuk `scp`, `sftp`, dan VS Code Remote-SSH.
+- Audit & Remote: activity log, sesi remote yang aktif, sesi Open Web yang bisa dicabut admin, dan riwayat SSH lewat bastion (siapa, dari IP mana, ke VM mana).
 
 ## Komponen
 
@@ -46,13 +48,14 @@ Langkah berikutnya ada di [`docs/PANDUAN_DEPLOYMENT.md`](docs/PANDUAN_DEPLOYMENT
 - Membuat pool, API token, dan izin di Proxmox (Bagian 2).
 - Mendaftarkan Proxmox ke dashboard (Bagian 3).
 - Membuat template VM (Bagian 4, detailnya di [`docs/PANDUAN_TEMPLATE_VM.md`](docs/PANDUAN_TEMPLATE_VM.md)).
+- Mengaktifkan SSH lewat bastion (Bagian 8). Panduan untuk mahasiswa ada di [`docs/PANDUAN_SSH.md`](docs/PANDUAN_SSH.md).
 
 ## Struktur repo
 
 ```
-backend/     FastAPI: routers/, services/, migrations/, tests/, docker-compose.yml
+backend/     FastAPI: routers/, services/, migrations/, tests/, scripts/ (backup), bastion/ (SSH), docker-compose.yml
 frontend/    React + Vite: src/pages/, src/components/, nginx.conf
-docs/        Panduan deployment dan pembuatan template VM
+docs/        Panduan deployment, pembuatan template VM, dan SSH untuk mahasiswa
 setup.sh     Instalasi satu perintah
 ```
 
@@ -80,26 +83,26 @@ CI di `.github/workflows/ci.yml` menjalankan test backend, lint, dan build front
 - Hak akses diperiksa di server. Menyembunyikan tombol di tampilan tidak dianggap sebagai kontrol akses.
 - Kredensial VM dan token Proxmox disimpan terenkripsi di database aplikasi. Saat Connect, kredensial juga diberikan ke Guacamole dan tersimpan di database Guacamole tanpa enkripsi tambahan dari CCD.
 - `setup.sh` membuat password admin, password database, dan semua secret secara acak, lalu membatasi izin `backend/.env` menjadi `600`.
-- Hanya port 80 yang dibuka ke luar. Backend, Guacamole, PostgreSQL, dan Redis hanya bisa dijangkau dari server itu sendiri atau dari jaringan Docker.
+- Hanya port 80 yang dibuka ke luar. Backend, Guacamole, PostgreSQL, dan Redis hanya bisa dijangkau dari server itu sendiri atau dari jaringan Docker. Bastion SSH (port 2222) hanya terbuka kalau diaktifkan, hanya menerima SSH key, tidak memberi shell, dan hanya meneruskan ke VM yang diizinkan dashboard.
 - Login dibatasi: 5 kali gagal, akun terkunci 5 menit. Token JWT berlaku 8 jam dan dicabut saat logout.
 - `/healthz` terbuka tanpa login, tetapi pesan error dan detail Proxmox hanya ditampilkan untuk admin.
 - Aktivitas penting tercatat di audit log. Isi sesi remote sengaja tidak direkam demi privasi.
 
 Dashboard tidak menyediakan HTTPS sendiri. Untuk akses dari luar jaringan, pakai `tailscale serve` atau `tailscale funnel` (Bagian 7 panduan deployment), atau reverse proxy dengan sertifikat TLS.
 
-Laporkan celah keamanan secara privat ke [kontak pengelola], bukan lewat issue publik.
+Laporkan celah keamanan secara privat lewat tab **Security → Report a vulnerability** di repo ini, bukan lewat issue publik.
 
 ## Batasan yang diketahui
 
-- Belum ada login SSO/LDAP.
-- Belum ada kuota per mahasiswa dan peran dosen atau asisten.
-- Belum ada masa berlaku akun otomatis.
+- Login hanya dengan akun lokal dashboard.
+- Peran yang tersedia: superadmin, sysadmin, dan mahasiswa. Tidak ada kuota sumber daya per mahasiswa.
+- Akun tidak kedaluwarsa otomatis. Admin menonaktifkannya manual.
 - Hanya mendukung Proxmox VE.
-- Belum diuji pada skala besar.
+- Dipakai pada skala satu lab praktikum.
 
 ## Status
 
-Prototype yang sudah berjalan di lab praktikum. Proyek ini berawal sebagai proyek riset dan pernah dipresentasikan di openSUSE Summit.
+Prototype yang sudah berjalan di lab praktikum. Proyek ini berawal sebagai proyek riset dan dibawakan di openSUSE Summit Asia 2026.
 
 ## Lisensi
 

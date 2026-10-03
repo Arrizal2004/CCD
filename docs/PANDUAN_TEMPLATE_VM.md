@@ -164,7 +164,7 @@ qm set <vmid> --ide0 local-lvm:cloudinit
 ```
 
 ### 3. Pastikan QEMU Guest Agent aktif (opsi Proxmox)
-Options → QEMU Guest Agent → Enabled. (Kalau VM dibuat lewat `qm create ... --agent 1` seperti VM 102/103, ini biasanya sudah aktif — tinggal cek centangnya).
+Options → QEMU Guest Agent → Enabled. (Kalau VM dibuat lewat `qm create ... --agent 1`, ini biasanya sudah aktif — tinggal cek centangnya).
 
 ### 4. Pastikan boot order benar
 Options → Boot Order → pastikan disk utama (`scsi0`) nomor satu, drive CD-ROM/CloudInit tidak perlu ikut boot:
@@ -205,7 +205,7 @@ Ukuran disk template jadi batas bawah semua clone: disk VM bisa diperbesar dari 
 
 ## Bagian E — Backup Template & Pindahkan ke Proxmox Lain
 
-Ini operasi native Proxmox (`vzdump`/`qmrestore`) — dilakukan langsung di Proxmox, **bukan lewat dashboard CCD** (fitur backup di dashboard sudah dicabut, lihat bagian "Produksi" di panduan presentasi). Berikut langkahnya, sudah diuji langsung dan **dikonfirmasi status "template" ikut terbawa utuh** saat direstore.
+Ini operasi native Proxmox (`vzdump`/`qmrestore`) — dilakukan langsung di Proxmox, **bukan lewat dashboard CCD**. Berikut langkahnya, sudah diuji langsung dan **dikonfirmasi status "template" ikut terbawa utuh** saat direstore.
 
 ### 1. Backup di Proxmox sumber
 ```bash

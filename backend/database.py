@@ -287,6 +287,47 @@ async def init_db():
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_openweb_sessions_created ON openweb_sessions (created_at DESC)")
 
+        # SSH public key pengguna untuk bastion SSH (opt-in). Dihapus otomatis bersama user-nya.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_ssh_keys (
+                id           SERIAL PRIMARY KEY,
+                user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name         TEXT NOT NULL DEFAULT '',
+                key_type     TEXT NOT NULL,
+                public_key   TEXT NOT NULL,
+                fingerprint  TEXT NOT NULL UNIQUE,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                last_used_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_ssh_keys_user ON user_ssh_keys (user_id)")
+
+        # Sesi SSH lewat bastion, disusun dari log sshd (services/ssh_audit.py). Tanpa FK ke users
+        # supaya riwayat tetap ada walaupun akunnya dihapus.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ssh_sessions (
+                id             SERIAL PRIMARY KEY,
+                user_id        INTEGER,
+                username       TEXT NOT NULL DEFAULT '',
+                role           TEXT NOT NULL DEFAULT '',
+                key_name       TEXT NOT NULL DEFAULT '',
+                fingerprint    TEXT NOT NULL,
+                client_ip      TEXT NOT NULL,
+                client_port    INTEGER NOT NULL,
+                monitor_pid    INTEGER,
+                child_pid      INTEGER,
+                targets        TEXT[] NOT NULL DEFAULT '{}',
+                denied_targets TEXT[] NOT NULL DEFAULT '{}',
+                bytes_sent     BIGINT,
+                bytes_received BIGINT,
+                started_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                ended_at       TIMESTAMPTZ,
+                end_reason     TEXT
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_ssh_sessions_started ON ssh_sessions (started_at DESC)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_ssh_sessions_open ON ssh_sessions (client_ip, client_port) WHERE ended_at IS NULL")
+
         # OS Accounts per VM — beberapa user OS bisa diassign ke student berbeda
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS vm_os_accounts (
@@ -668,6 +709,7 @@ async def purge_old_audit_logs() -> int:
         )
 
         await conn.execute("DELETE FROM openweb_sessions WHERE created_at < $1", cutoff)
+        await conn.execute("DELETE FROM ssh_sessions WHERE started_at < $1", cutoff)
 
     log.info("Audit log cleanup done", extra={"rows": deleted, "retention_days": AUDIT_RETENTION_DAYS})
     return deleted or 0

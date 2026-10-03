@@ -81,7 +81,7 @@ export default function ProxmoxSnapshotModal({ instance, node, vmid, vmName, can
                     <div style={{ background: 'var(--red-glow)', border: '1px solid var(--red)', borderRadius: 6, padding: '6px 10px', color: 'var(--red)', fontSize: 11, marginBottom: 12 }}>⚠ {error}</div>
                 )}
 
-                <form onSubmit={handleCreate} style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+                <form onSubmit={handleCreate} className="ccd-wrap-mobile" style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
                     <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="nama-snapshot"
                         style={{ flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', color: 'var(--text)', fontSize: 12 }} />
                     <input value={newDesc} onChange={e => setNewDesc(e.target.value)} placeholder="deskripsi (opsional)"

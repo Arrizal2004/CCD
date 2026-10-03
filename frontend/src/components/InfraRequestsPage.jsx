@@ -634,7 +634,7 @@ export default function InfraRequestsPage({ currentUser }) {
             </div>
 
             {/* Stat cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 18 }}>
+            <div className="ccd-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 18 }}>
                 {STAT_CARDS.map(({ key, label, color }) => {
                     const count  = key ? (counts[key] ?? 0) : totalCount;
                     const active = filterStatus === key;

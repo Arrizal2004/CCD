@@ -150,7 +150,7 @@ export default function TicketsPage({ currentUser }) {
             </div>
 
             {/* ── Stat cards (clickable filter) ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 18 }}>
+            <div className="ccd-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginBottom: 18 }}>
                 {STAT_CARDS.map(({ key, label, color }) => {
                     const val  = key === '' ? totalCount : counts[key];
                     const active = status === key;

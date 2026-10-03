@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAuditLogs, fetchRemoteSessions, killRemoteSession, fetchRemoteHistory, guacGrantAdmins, fetchOpenWebSessions, fetchOpenWebHistory, killOpenWebSession } from '../api';
+import { fetchAuditLogs, fetchRemoteSessions, killRemoteSession, fetchRemoteHistory, guacGrantAdmins, fetchOpenWebSessions, fetchOpenWebHistory, killOpenWebSession, fetchSshConfig, fetchSshSessions, fetchSshHistory } from '../api';
 
 const ROLE_COLOR = { superadmin: '#ff6b35', sysadmin: 'var(--cyan)', student: 'var(--purple)' };
 const SEV_COLOR = { CRITICAL: 'var(--red)', WARNING: 'var(--yellow)', INFO: 'var(--cyan)' };
@@ -31,11 +31,15 @@ function Badge({ text, color }) {
 
 export default function AdminPanel({ currentUser }) {
     const [tab, setTab] = useState('audit');
+    const [sshEnabled, setSshEnabled] = useState(false);
     const canKill = ['sysadmin', 'superadmin'].includes(currentUser?.role);
+    useEffect(() => { fetchSshConfig().then(c => setSshEnabled(!!c.enabled)); }, []);
+    const tabs = [['audit', '📋 Activity Log'], ['remote', '🖥 Remote Sessions'], ['web', '🌐 Web Sessions'],
+        ...(sshEnabled ? [['ssh', '🔑 SSH Sessions']] : [])];
     return (
         <div style={{ padding: '14px 20px', maxWidth: 1600, margin: '0 auto' }}>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-                {[['audit', '📋 Activity Log'], ['remote', '🖥 Remote Sessions'], ['web', '🌐 Web Sessions']].map(([id, l]) => (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                {tabs.map(([id, l]) => (
                     <button key={id} onClick={() => setTab(id)}
                         style={{ padding: '7px 16px', borderRadius: 8, fontSize: 13, cursor: 'pointer', fontFamily: 'var(--fmono)',
                             background: tab === id ? 'var(--cyan-glow, #00e5ff22)' : 'var(--bg-card)',
@@ -48,6 +52,7 @@ export default function AdminPanel({ currentUser }) {
             {tab === 'audit' && <ActivityLog />}
             {tab === 'remote' && <RemoteSessions canKill={canKill} />}
             {tab === 'web' && <WebSessions canKill={canKill} />}
+            {tab === 'ssh' && <SshSessions />}
         </div>
     );
 }
@@ -446,6 +451,119 @@ function WebSessionTable({ mode, canKill }) {
                 </table>
             </div>
             {!active && <Pager page={page} totalPages={totalPages} total={data.total} loading={loading} onPrev={() => setPage(p => Math.max(1, p - 1))} onNext={() => setPage(p => Math.min(totalPages, p + 1))} />}
+        </div>
+    );
+}
+
+// ── SSH Sessions (bastion) ───────────────────────────────────────────────────
+const SSH_STATUS = {
+    active: ['ACTIVE', 'var(--green)'], closed: ['CLOSED', 'var(--text3)'], timeout: ['TIMEOUT', 'var(--yellow)'],
+    error: ['DROPPED', 'var(--yellow)'], restart: ['BASTION RESTART', 'var(--text3)'], lost: ['UNKNOWN', 'var(--text3)'],
+};
+
+function fmtBytes(n) {
+    if (n == null) return '—';
+    const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0, v = n;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(i && v < 10 ? 1 : 0)} ${u[i]}`;
+}
+
+function SshSessions() {
+    const [sub, setSub] = useState('active');
+    return (
+        <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+                {[['active', 'Active Sessions'], ['history', 'Session History']].map(([id, l]) => (
+                    <button key={id} onClick={() => setSub(id)}
+                        style={{ padding: '5px 14px', borderRadius: 6, fontSize: 12, cursor: 'pointer', fontFamily: 'var(--fmono)',
+                            background: sub === id ? 'var(--bg-hover)' : 'transparent', color: sub === id ? 'var(--cyan)' : 'var(--text3)',
+                            border: `1px solid ${sub === id ? 'var(--cyan)44' : 'var(--border)'}` }}>{l}</button>
+                ))}
+                <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 6 }}>
+                    SSH dari terminal pengguna lewat bastion. Isi sesi tidak direkam.
+                </span>
+            </div>
+            <SshSessionTable key={sub} mode={sub} />
+        </div>
+    );
+}
+
+function SshSessionTable({ mode }) {
+    const active = mode === 'active';
+    const [data, setData] = useState({ total: 0, items: [] });
+    const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(1);
+
+    useEffect(() => {
+        let alive = true;
+        const tick = () => (active
+            ? fetchSshSessions().then(d => ({ total: (d.sessions || []).length, items: d.sessions || [] }))
+            : fetchSshHistory(page, PAGE)
+        ).then(d => { if (alive) { setData(d); setLoading(false); } });
+        tick();
+        const id = active ? setInterval(tick, 5000) : null;
+        return () => { alive = false; if (id) clearInterval(id); };
+    }, [active, page]);
+
+    const totalPages = Math.max(1, Math.ceil(data.total / PAGE));
+    const goto = (p) => {
+        const next = Math.min(totalPages, Math.max(1, p));
+        if (next !== page) { setLoading(true); setPage(next); }
+    };
+    const heads = ['User', 'Dari IP', 'Key', 'Tujuan', 'Mulai', active ? 'Durasi' : 'Selesai', 'Data ↓ / ↑', 'Status'];
+
+    return (
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+            {active && (
+                <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--text2)' }}>
+                    <span style={{ color: 'var(--green)' }}>●</span> {data.total} sesi tersambung · auto-refresh 5s
+                </div>
+            )}
+            <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead><tr>{heads.map(h => <th key={h} style={TH}>{h}</th>)}</tr></thead>
+                    <tbody>
+                        {data.items.map(s => {
+                            const [stText, stColor] = SSH_STATUS[s.status] || [s.status, 'var(--text3)'];
+                            const denied = s.denied_targets || [];
+                            return (
+                                <tr key={s.id}>
+                                    <td style={TD}>
+                                        <span style={{ color: 'var(--text)' }}>{s.username || '—'}</span>{' '}
+                                        {s.role && <Badge text={s.role} color={ROLE_COLOR[s.role] || 'var(--text3)'} />}
+                                    </td>
+                                    <td style={{ ...TD, fontFamily: 'var(--fmono)' }}>{s.client_ip}</td>
+                                    <td style={TD} title={s.fingerprint}>{s.key_name || <span style={{ fontFamily: 'var(--fmono)' }}>{s.fingerprint.slice(0, 18)}…</span>}</td>
+                                    <td style={{ ...TD, fontFamily: 'var(--fmono)' }}>
+                                        {s.targets.map(t => (
+                                            <div key={t.target} style={{ color: 'var(--cyan)' }}>
+                                                {t.target}{t.vm && <span style={{ color: 'var(--text3)' }}> · {t.vm}</span>}
+                                            </div>
+                                        ))}
+                                        {denied.map(t => (
+                                            <div key={t} style={{ color: 'var(--red)' }} title="Bukan VM yang boleh diakses pengguna ini">✕ {t} ditolak</div>
+                                        ))}
+                                        {s.targets.length === 0 && denied.length === 0 && '—'}
+                                    </td>
+                                    <td style={{ ...TD, fontFamily: 'var(--fmono)' }}>{fmtTime(s.started_at)}</td>
+                                    <td style={{ ...TD, fontFamily: 'var(--fmono)' }}>
+                                        {active ? fmtDur(s.duration) : <>{fmtTime(s.ended_at)}<div style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtDur(s.duration)}</div></>}
+                                    </td>
+                                    <td style={{ ...TD, fontFamily: 'var(--fmono)' }}>{s.bytes_sent == null ? '—' : `${fmtBytes(s.bytes_sent)} / ${fmtBytes(s.bytes_received)}`}</td>
+                                    <td style={TD}><Badge text={stText} color={stColor} /></td>
+                                </tr>
+                            );
+                        })}
+                        {!loading && data.items.length === 0 && (
+                            <tr><td colSpan={heads.length} style={{ ...TD, textAlign: 'center', color: 'var(--text3)', padding: 30 }}>
+                                {active ? 'Tidak ada sesi SSH yang tersambung' : 'Belum ada riwayat SSH lewat bastion'}
+                            </td></tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+            {!active && <Pager page={page} totalPages={totalPages} total={data.total} loading={loading} onPrev={() => goto(page - 1)} onNext={() => goto(page + 1)} />}
         </div>
     );
 }

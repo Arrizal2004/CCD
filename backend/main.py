@@ -38,7 +38,7 @@ from database import init_db, close_pool, run_cleanup_job
 from auth import require_superadmin
 from routers import vm_metadata, users
 from routers import ssh_creds, linux_vm, terminal, metrics_ws, admin, tickets
-from routers import infra_requests, groups, guac, proxmox, tailscale, openweb
+from routers import infra_requests, groups, guac, proxmox, tailscale, openweb, ssh_keys
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client: aioredis.Redis = None
@@ -127,6 +127,7 @@ app.include_router(guac.router,           prefix="/ws/guac",                   t
 app.include_router(proxmox.router,        prefix="/api/v1/proxmox",            tags=["Proxmox"])
 app.include_router(tailscale.router,       prefix="/api/v1/tailscale",           tags=["Tailscale"])
 app.include_router(openweb.router,         prefix="/api/v1/openweb",             tags=["Open Web"])
+app.include_router(ssh_keys.router,        prefix="/api/v1/ssh-keys",            tags=["SSH Keys"])
 
 
 @app.get("/health")

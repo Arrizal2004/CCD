@@ -115,6 +115,23 @@ services:
       guacamole:
         condition: service_healthy
 
+  # Bastion SSH (opsional): hanya berjalan kalau COMPOSE_PROFILES=ssh di backend/.env.
+  # Membuka port BASTION_PUBLIC_PORT (bawaan 2222). Lihat docs/PANDUAN_DEPLOYMENT.md Bagian 8.
+  bastion:
+    build: ./bastion
+    container_name: ccd-bastion
+    restart: unless-stopped
+    profiles: ["ssh"]
+    ports:
+      - "${BASTION_PUBLIC_PORT:-2222}:2222"
+    environment:
+      - BASTION_TOKEN=${BASTION_TOKEN:-}
+    volumes:
+      - bastion_keys:/data
+    depends_on:
+      backend:
+        condition: service_started
+
   frontend:
     build: ../frontend
     container_name: ccd-frontend
@@ -127,3 +144,4 @@ services:
 volumes:
   redis_data:
   postgres_data:
+  bastion_keys:

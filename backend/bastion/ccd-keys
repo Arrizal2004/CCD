@@ -1,0 +1,16 @@
+#!/bin/sh
+# AuthorizedKeysCommand: ccd-keys <user> <fingerprint> "<alamat> <port> <alamat> <port>" (%C)
+# Mencetak baris authorized_keys dari CCD untuk key tersebut. Output kosong = ditolak.
+[ "$1" = "tunnel" ] || exit 0
+case "$2" in
+    SHA256:*) ;;
+    *) exit 0 ;;
+esac
+fp=$2
+# %C berisi pasangan alamat bastion dan klien. OpenSSH 10 menaruh alamat bastion lebih dulu,
+# berbeda dari urutan di man page, jadi pilih pasangan yang port-nya bukan port bastion (2222).
+set -- $3
+if [ "$2" = 2222 ]; then client=$3; else client=$1; fi
+exec curl -fsS --max-time 5 -H @/etc/ssh/bastion-header \
+    --get --data-urlencode "fingerprint=$fp" --data-urlencode "client=$client" \
+    http://backend:8000/api/v1/ssh-keys/authorized

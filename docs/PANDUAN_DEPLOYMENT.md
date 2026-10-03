@@ -1,6 +1,6 @@
 # Panduan Deployment — Campus Cloud Dashboard (CCD)
 
-Panduan lengkap dari VPS kosong sampai mahasiswa bisa `Connect` ke VM lab lewat browser. Ditulis berdasarkan langkah yang benar-benar diverifikasi jalan di deployment ini.
+Panduan lengkap dari VPS kosong sampai mahasiswa bisa `Connect` ke VM lab lewat browser. Ditulis berdasarkan langkah yang sudah kami jalankan dan verifikasi.
 
 **Urutan:** (1) Deploy dashboard di VPS → (2) Siapkan Proxmox (token, user, pool) → (3) Daftarkan Proxmox ke dashboard → (4) Buat template → (5) Deploy VM dari dashboard → (6) Connect dan Open Web.
 
@@ -23,11 +23,19 @@ cd campus-cloud-dashboard
 
 Skrip ini otomatis:
 1. Cek Docker + Docker Compose plugin — kalau belum ada, install (Ubuntu/Debian lewat installer resmi Docker; openSUSE lewat `zypper`; distro lain dicoba lewat installer resmi Docker sebagai fallback).
-2. Buat `backend/.env` dari `.env.example`. Semua secret dan password dibuat acak dengan `openssl rand`: `JWT_SECRET`, `AGENT_ENC_SECRET`, `GUAC_ADMIN_PASS`, `INITIAL_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, dan `GUAC_DB_PASSWORD`. `ALLOWED_ORIGINS` diisi dari IP server yang terdeteksi. File ini diberi izin `600`.
+2. Buat `backend/.env` dari `.env.example`. Semua secret dan password dibuat acak dengan `openssl rand`: `JWT_SECRET`, `AGENT_ENC_SECRET`, `GUAC_ADMIN_PASS`, `INITIAL_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, `GUAC_DB_PASSWORD`, dan `BASTION_TOKEN`. `ALLOWED_ORIGINS` diisi dari IP server yang terdeteksi. File ini diberi izin `600`.
 3. Memastikan port 80 kosong, membangun image backend lalu frontend satu per satu, menjalankan semua container, dan menunggu backend siap.
-4. Mencetak ringkasan: URL dashboard, password admin dashboard, dan password admin Guacamole. Keduanya hanya dicetak sekali, jadi simpan.
+4. Memasang cron backup database harian (Bagian 9).
+5. Mencetak ringkasan: URL dashboard, password admin dashboard, dan password admin Guacamole. Keduanya hanya dicetak sekali, jadi simpan.
 
 **Idempotent** — aman dijalankan ulang kapan saja (redeploy setelah `git pull`, misalnya): tidak akan reinstall Docker yang sudah ada, dan tidak akan menimpa `backend/.env` yang sudah ada.
+
+Update ke versi terbaru cukup dengan:
+```bash
+git pull
+./setup.sh
+```
+Image dibangun ulang (termasuk bastion kalau aktif), container diganti, dan isi database serta `backend/.env` tidak berubah. Dashboard tidak bisa diakses selama sekitar satu menit saat container diganti.
 
 Kalau `backend/.env` sudah pernah dibuat manual (Bagian 1.3 di bawah) sebelum menjalankan `setup.sh`, skrip ini otomatis memakainya apa adanya.
 
@@ -57,7 +65,8 @@ Variabel **opsional**:
 | Variabel | Kapan diisi |
 |---|---|
 | `AGENT_ENC_SECRET` | `openssl rand -hex 32` — mengaktifkan enkripsi payload Redis. Kosongkan kalau tidak perlu (mode kompatibel, tetap aman untuk kredensial karena itu sudah dienkripsi lewat `JWT_SECRET` di atas). |
-| `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET` | Hanya kalau mau integrasi API Tailscale dari dashboard. **Rekomendasi kami: lewati ini** — atur Tailscale langsung di level OS VPS (`tailscale up`), bukan lewat dashboard. Lihat catatan di Bagian 6. |
+| `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET` | Hanya kalau mau integrasi API Tailscale dari dashboard. **Rekomendasi kami: lewati ini** — atur Tailscale langsung di level OS VPS (`tailscale up`), bukan lewat dashboard. Lihat catatan di Bagian 7. |
+| `COMPOSE_PROFILES`, `BASTION_*` | Hanya kalau mengaktifkan SSH lewat bastion. Lihat Bagian 8. |
 
 Contoh `.env` minimal:
 ```bash
@@ -82,9 +91,9 @@ Tunggu sampai semua container `Up`:
 ```bash
 sudo docker compose ps
 ```
-Harus ada 6 container: `ccd-backend`, `ccd-frontend`, `ccd-guacamole`, `ccd-guacd`, `ccd-postgres`, `ccd-redis`.
+Harus ada 6 container: `ccd-backend`, `ccd-frontend`, `ccd-guacamole`, `ccd-guacd`, `ccd-postgres`, `ccd-redis`. Kalau bastion diaktifkan (Bagian 8), ada satu lagi: `ccd-bastion`.
 
-Di deploy pertama, `up` terasa lebih lama (1-2 menit) karena backend sengaja menunggu Postgres, Redis, guacd, dan Guacamole berstatus *healthy* dulu (lihat kolom `STATUS`). Ini mencegah masalah lama di mana backend start sebelum Guacamole siap, password admin Guacamole tidak jadi dirotasi, dan Connect baru jalan setelah backend di-restart manual. Kalau backend tidak kunjung start, cek container mana yang belum healthy:
+Di deploy pertama, `up` terasa lebih lama (1-2 menit) karena backend sengaja menunggu Postgres, Redis, guacd, dan Guacamole berstatus *healthy* dulu (lihat kolom `STATUS`), supaya password admin Guacamole pasti terpasang sebelum Connect dipakai. Kalau backend tidak kunjung start, cek container mana yang belum healthy:
 ```bash
 sudo docker compose ps
 sudo docker compose logs --tail=30 guacamole
@@ -146,7 +155,7 @@ Semua VM & template yang mau dikelola dashboard harus berada di pool ini — tok
 ### 2.2 Buat API Token
 Dua opsi — pilih salah satu:
 
-**Opsi A — token dari user `root@pam` (yang sudah teruji jalan di deployment ini):**
+**Opsi A — token dari user `root@pam` (yang kami pakai):**
 ```bash
 pveum user token add root@pam ccd-dashboard --privsep 1
 ```
@@ -281,6 +290,16 @@ Hanya superadmin dan sysadmin. Tombol **Resize** di daftar VM aktif kalau VM sud
 2. Tab **Servers** — hanya VM yang di-assign yang tampil, dengan tombol aksi (Start/Stop/Snapshot/**Connect**). Nama host Proxmox dan panel Host Performance tidak ditampilkan ke mahasiswa, dan tab **Topology** menampilkan username mereka sebagai induk VM.
 3. Klik **Connect** → sesi SSH/RDP terbuka **langsung di tab browser** (Apache Guacamole) — tidak perlu install client SSH/RDP apa pun.
 
+### Connect dari smartphone atau tablet
+Saat Connect pertama kali dari perangkat sentuh, dashboard mengaktifkan input "Text input" di Guacamole: kolom teks muncul di bawah layar, dan mengetuknya membuka keyboard HP. Untuk mengganti cara input, geser jari dari tepi kiri layar ke kanan untuk membuka menu Guacamole, lalu pilih di bagian **Input method**:
+- **Text input**: memakai keyboard HP.
+- **On-screen keyboard**: keyboard bawaan Guacamole dengan tombol Ctrl, Alt, Esc, Tab, dan panah.
+- **None**: hanya keyboard fisik (mis. keyboard Bluetooth).
+
+Pilihan ini tersimpan di browser perangkat itu. Di menu yang sama, **Mouse emulation mode** "Relative" membuat jari bekerja seperti touchpad, biasanya lebih presisi untuk RDP.
+
+Keyboard HP, terutama aplikasi keyboard pihak ketiga, bisa menyimpan kata yang diketik untuk prediksi. Untuk mengetik password di sesi remote (mis. `sudo`), pakai On-screen keyboard Guacamole.
+
 ### Kalau Connect gagal / IP belum kedeteksi
 Biasanya karena QEMU Guest Agent di dalam guest belum jalan (baru saja boot, atau lupa install). Admin bisa:
 - Tunggu ~1 menit lalu refresh (agent butuh waktu untuk mulai melapor setelah boot).
@@ -297,7 +316,8 @@ Tab **Open Web**: ketik alamat web lalu klik **Buka**, halaman tampil di dalam d
 ### Sebagai admin — memantau sesi
 - Tab **Audit & Remote → Remote Sessions**: lihat siapa yang sedang connect ke VM mana, bisa paksa putus sesi (*Kill Session*).
 - Tab **Audit & Remote → Web Sessions**: link Open Web yang aktif dan riwayatnya (user, IP target, IP pengakses, jumlah request). IP pengakses kuning berarti link dipakai dari lebih dari satu IP. *Kill Link* mematikan link itu seketika. Jumlah request hanya perkiraan.
-- Tab **Audit & Remote → Activity Log**: riwayat semua aksi penting (login, create/delete VM, resize, Open Web, dst).
+- Tab **Audit & Remote → SSH Sessions** (muncul kalau bastion aktif, Bagian 8): siapa yang SSH lewat bastion, dari IP mana, ke VM mana, durasi, dan jumlah data.
+- Tab **Audit & Remote → Activity Log**: riwayat semua aksi penting (login, create/delete VM, resize, Open Web, SSH, dst).
 
 ---
 
@@ -324,3 +344,84 @@ Buka link login yang muncul, authorize di browser.
 Kedua mode otomatis dapat sertifikat HTTPS valid dan URL bersih (`https://<hostname>.<tailnet-domain>.ts.net/`), tanpa perlu urus reverse proxy/TLS sendiri. Konfigurasi ini tersimpan permanen, otomatis jalan lagi setelah reboot.
 
 Dengan mode Funnel, halaman login bisa dicoba siapa saja di internet. Pastikan password admin bukan `admin123` (Bagian 1.5). Pembatasan login sudah aktif: 5 kali gagal, akun terkunci 5 menit.
+
+---
+
+## 8. (Opsional) SSH dari Terminal Sendiri — Bastion
+
+Selain lewat browser, pengguna bisa SSH ke VM-nya dari terminal sendiri, `scp`/`sftp`, atau VS Code Remote-SSH, lewat bastion di VPS:
+
+```
+Laptop ──SSH (key)──▶ VPS :2222 (bastion) ──Tailscale──▶ VM :22
+```
+
+Bastion tidak menyimpan key dan tidak memberi shell. Setiap login, bastion bertanya ke dashboard: key ini milik siapa, dan boleh diteruskan ke mana. Mahasiswa hanya bisa ke VM yang di-assign kepadanya (langsung atau lewat group), admin ke semua VM yang terdaftar. Menonaktifkan akun, mencabut assignment, atau menghapus key langsung berlaku di login berikutnya.
+
+### 8.1 Mengaktifkan
+Fitur ini mati secara bawaan karena membuka satu port baru ke internet. Di `backend/.env`:
+```bash
+COMPOSE_PROFILES=ssh
+BASTION_PUBLIC_PORT=2222        # port yang dibuka di VPS
+BASTION_PUBLIC_HOST=            # kosong = alamat yang dipakai membuka dashboard; isi domain kalau ada
+```
+`BASTION_TOKEN` diisi otomatis oleh `./setup.sh`, juga untuk `.env` lama. Lalu:
+```bash
+./setup.sh
+# atau manual: cd backend && sudo docker compose build bastion && sudo docker compose up -d
+cd backend && sudo docker compose logs bastion | grep SHA256    # fingerprint host key
+```
+Pastikan port 2222 tidak diblokir firewall VPS. Untuk mematikan lagi: kosongkan `COMPOSE_PROFILES`, lalu `sudo docker compose stop bastion`. Fingerprint juga tampil di tombol **SSH** pada kartu VM.
+
+**Memakai domain.** Buat record DNS khusus untuk bastion, mis. `ssh.<domain>` → IP VPS, lalu isi `BASTION_PUBLIC_HOST=ssh.<domain>` dan jalankan `cd backend && sudo docker compose up -d backend`. Kalau domain dikelola Cloudflare, record bastion harus **DNS only** (awan abu-abu). Proxy Cloudflare hanya meneruskan HTTP/HTTPS, jadi SSH ke port 2222 lewat record yang di-proxy akan gagal. Record untuk dashboard boleh di-proxy, tetapi dashboard hanya melayani HTTP di port 80. Dengan mode SSL *Flexible*, jalur dari Cloudflare ke server tidak terenkripsi, jadi pakai hanya kalau risiko itu bisa diterima. Tambahkan juga alamat dashboard yang baru ke `ALLOWED_ORIGINS`.
+
+Setelah alamat bastion pindah dari IP ke domain, pengguna yang pernah terhubung akan ditanya konfirmasi host key sekali lagi. Fingerprint-nya tetap sama, karena host key disimpan di volume `bastion_keys`.
+
+### 8.2 Syarat VM
+- IP VM sudah diisi di **Atur kredensial & IP**, dan protokolnya SSH (VM Linux).
+- VM bisa dijangkau dari VPS (Bagian 1.6). Lewat subnet route Tailscale, koneksi biasanya terlihat datang dari IP LAN Proxmox, jadi firewall di VM harus mengizinkan SSH dari alamat itu.
+- Pengguna tetap login ke akun OS di dalam VM. Bastion hanya mengantar sampai VM.
+
+### 8.3 Cara pakai (untuk mahasiswa)
+Panduan lengkap per OS (Linux, macOS, Windows), termasuk `scp`, VS Code, dan penanganan error, ada di [`PANDUAN_SSH.md`](PANDUAN_SSH.md). Ringkasnya:
+
+1. Buat key di laptop (sekali saja): `ssh-keygen -t ed25519`.
+2. Di dashboard, buka **Profil**, bagian **SSH Key**, lalu tempel isi `~/.ssh/id_ed25519.pub`. Jangan pernah menempel private key.
+3. Di halaman **Servers**, klik tombol **SSH** pada VM. Dashboard menampilkan perintah dan isi `~/.ssh/config` yang siap disalin, contohnya:
+   ```bash
+   ssh -J tunnel@<alamat-bastion>:2222 akun-os@<ip-vm>
+   ```
+4. Saat pertama kali terhubung, cocokkan fingerprint host key bastion dengan yang tampil di tombol SSH.
+
+Kalau muncul `administratively prohibited`, VM itu tidak termasuk VM Anda. Kalau ditolak di bastion (`Permission denied (publickey)`), periksa apakah key sudah didaftarkan dan akun Anda aktif.
+
+### 8.4 Audit
+Bastion meneruskan log `sshd` ke dashboard, jadi setiap koneksi tercatat di **Audit & Remote → SSH Sessions**: user, key, IP asal, VM tujuan, waktu mulai dan selesai, serta jumlah data. Di **Activity Log** muncul:
+
+| Kejadian | Artinya |
+|---|---|
+| `SSH_LOGIN` | Key diterima bastion |
+| `SSH_LOGOUT` | Sesi selesai, dengan durasi dan VM tujuan |
+| `SSH_DENIED` | Mencoba membuka VM yang bukan haknya, atau key milik akun yang sedang tidak berhak (nonaktif, belum diverifikasi, tidak punya VM) |
+
+Isi sesi tidak direkam. Bastion memang tidak bisa melihatnya, karena koneksi terenkripsi langsung antara laptop dan VM. Percobaan dengan key yang tidak terdaftar di dashboard (biasanya pemindaian dari internet) hanya ada di `sudo docker compose logs bastion`.
+
+Sesi yang sedang berjalan tidak ikut terputus saat key dihapus atau akun dinonaktifkan. Yang ditolak adalah login berikutnya. Kalau sesi yang sedang berjalan harus diputus, `sudo docker compose restart bastion` memutus semua sesi SSH lewat bastion.
+
+---
+
+## 9. Backup Database
+
+`setup.sh` memasang cron harian jam 02:00 yang membackup kedua database (data aplikasi `ccddb` dan Guacamole `guacamoledb`) ke `/var/backups/campus-cloud-dashboard`, dengan retensi 14 hari. Log-nya di `/var/log/ccd-backup.log`. Backup manual:
+```bash
+sudo ./backend/scripts/backup-db.sh
+```
+
+Restore menimpa database tujuan sepenuhnya. Hentikan dulu container yang memakainya:
+```bash
+cd backend
+sudo docker compose stop backend            # untuk ccddb; untuk guacamoledb hentikan guacamole
+sudo ./scripts/restore-db.sh ccddb /var/backups/campus-cloud-dashboard/ccddb-<tanggal>.sql.gz
+sudo docker compose start backend
+```
+
+Simpan juga salinan `backend/.env` di tempat yang aman. Kredensial VM dan token Proxmox di database dienkripsi dengan `JWT_SECRET`, jadi backup database tidak bisa dipakai tanpa `.env` yang sama.
