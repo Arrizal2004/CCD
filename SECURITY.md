@@ -33,4 +33,5 @@ Beberapa hal yang menjadi tanggung jawab pemasang (rinciannya ada di [panduan de
 - Batasi akses SSH ke server dengan kunci SSH, matikan login root dengan password, dan pasang firewall. Hanya port yang dipakai (80/443 dan, kalau bastion aktif, 2222) yang perlu terbuka.
 - Pasang HTTPS di depan dashboard dan isi `ALLOWED_ORIGINS` dengan alamat yang sebenarnya.
 - Simpan salinan backup database di luar server (skrip `backend/scripts/backup-db.sh` hanya menyimpan di disk yang sama).
+- Atur lama penyimpanan log audit di tab Sistem sesuai kebijakan institusi. Log tidak bisa dihapus dari dashboard.
 - Perbarui dependensi dan image Docker secara berkala.

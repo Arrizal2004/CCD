@@ -40,7 +40,7 @@ Pull request harus lolos test, `npm run lint` tanpa error, dan jumlah peringatan
   - Backend: pesan galat dibungkus `tr("teks Indonesia", "English text")` dari `backend/i18n.py`. Test memeriksa bahwa kedua teks ada dan variabelnya sama.
   - Catatan yang disimpan (Activity Log, pesan sistem di tiket) ditulis dalam bahasa Indonesia saat dicatat; itu disengaja.
 - **Skema database** diubah lewat berkas baru `backend/migrations/V0NN__nama.sql` (urut, jangan mengubah migrasi lama), dan dijalankan otomatis saat backend start.
-- **Aksi penting dicatat** di Activity Log lewat `log_activity(...)`: siapa, aksi apa, pada apa. Jangan menulis password, token, atau secret ke log.
+- **Aksi penting dicatat** di Activity Log lewat `log_activity(...)`: siapa, aksi apa, pada apa. Detailnya disusun dengan `both(lambda: tr("teks Indonesia", "English text"))` dari `services/audit.py` supaya tersimpan dalam dua bahasa; test gagal kalau ada yang berupa string biasa. Jangan menulis password, token, secret, atau isi percakapan pengguna ke log.
 - **Akses ditentukan di backend.** Pembatasan di tampilan hanya kenyamanan; setiap endpoint harus memeriksa peran lewat `require_*` di `backend/auth.py`, dan test RBAC harus ikut diperbarui.
 - **Komentar dan teks** memakai bahasa Indonesia yang ringkas, mengikuti gaya berkas di sekitarnya.
 

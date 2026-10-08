@@ -2,7 +2,18 @@
 
 Panduan lengkap dari VPS kosong sampai mahasiswa bisa `Connect` ke VM lab lewat browser. Ditulis berdasarkan langkah yang sudah kami jalankan dan verifikasi.
 
-**Urutan:** (1) Deploy dashboard di VPS → (2) Siapkan Proxmox (token, user, pool) → (3) Daftarkan Proxmox ke dashboard → (4) Buat template → (5) Deploy VM dari dashboard → (6) Connect dan Open Web.
+**Urutan:** (1) Deploy dashboard di VPS → (2) Siapkan Proxmox (token, user, pool) → (3) Daftarkan Proxmox ke dashboard → (4) Buat template → (5) Deploy VM dari dashboard → (6) Connect, Open Web, dan memantau sesi. Bagian 7 sampai 9 opsional atau pelengkap.
+
+**Daftar isi**
+1. [Clone dan deploy dashboard di VPS](#1-clone--deploy-dashboard-di-vps)
+2. [Siapkan Proxmox: user, pool, API token](#2-siapkan-proxmox--user-pool-api-token)
+3. [Daftarkan Proxmox ke dashboard](#3-daftarkan-proxmox-ke-dashboard)
+4. [Buat template](#4-buat-template)
+5. [Deploy VM dari CCD](#5-deploy-vm-dari-ccd), termasuk akun, grup, masa sewa, dan switch
+6. [Connect, Open Web, dan memantau sesi](#6-connect)
+7. [Akses dari luar jaringan (Tailscale) dan VPS privat dengan domain](#7-opsional-akses-dari-luar-jaringan--tailscale)
+8. [SSH dari terminal sendiri (bastion)](#8-opsional-ssh-dari-terminal-sendiri--bastion)
+9. [Backup database](#9-backup-database)
 
 ---
 
@@ -67,6 +78,8 @@ Variabel **opsional**:
 |---|---|
 | `AGENT_ENC_SECRET` | `openssl rand -hex 32` — mengaktifkan enkripsi payload Redis. Kosongkan kalau tidak perlu (mode kompatibel, tetap aman untuk kredensial karena itu sudah dienkripsi lewat `JWT_SECRET` di atas). |
 | `COMPOSE_PROFILES`, `BASTION_*` | Hanya kalau mengaktifkan SSH lewat bastion. Lihat Bagian 8. |
+| `AUDIT_RETENTION_DAYS` | Berapa hari log audit dan riwayat sesi disimpan sebelum dihapus otomatis (bawaan 180). Bisa diatur dari tab **Sistem**; nilai di sana lebih diutamakan. |
+| `GUAC_DATABASE_URL` | Hanya kalau Guacamole memakai database selain `guacamoledb` di server PostgreSQL yang sama. Dipakai untuk membaca riwayat sesi Remote. |
 
 Contoh `.env` minimal:
 ```bash
@@ -612,5 +625,12 @@ sudo docker compose stop backend            # untuk ccddb; untuk guacamoledb hen
 sudo ./scripts/restore-db.sh ccddb /var/backups/campus-cloud-dashboard/ccddb-<tanggal>.sql.gz
 sudo docker compose start backend
 ```
+
+**Salin backup ke luar server.** Backup di atas hanya ada di disk yang sama dengan database, jadi ikut hilang kalau disknya rusak. Salin secara berkala ke tempat lain, misalnya dengan cron di server backup yang menarik berkasnya:
+```bash
+# di server backup (ganti alamat, pengguna, dan folder)
+rsync -a --delete-after <pengguna>@<ip-dashboard>:/var/backups/campus-cloud-dashboard/ /srv/backup/ccd/
+```
+Coba restore ke server uji sesekali; backup yang belum pernah dicoba dipulihkan belum bisa dipercaya.
 
 Simpan juga salinan `backend/.env` di tempat yang aman. Kredensial VM dan token Proxmox di database dienkripsi dengan `JWT_SECRET`, jadi backup database tidak bisa dipakai tanpa `.env` yang sama.
