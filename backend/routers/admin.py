@@ -19,6 +19,7 @@ from database import get_pool
 from services.audit import query_logs, log_activity, action_types, failed_logins
 from services.csv_export import csv_response, fmt_time, MAX_ROWS
 from services import account_block, remote_history
+from services import system_settings as ss
 from i18n import tr
 
 router = APIRouter()
@@ -71,15 +72,17 @@ async def export_audit_logs(
     user: dict = Depends(require_sysadmin),
 ):
     """Activity Log sesuai filter yang sedang dipakai, sebagai CSV (maks. 50.000 baris terbaru)."""
+    tz = ss.tzinfo(await ss.get_settings())
+    tzn = tz.key
     filters = _audit_filters(search, severity, start, end, action, username)
     data = await query_logs(limit=MAX_ROWS, offset=0, **filters)
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
                        f"{user.get('username')} mengekspor {len(data['items'])} baris Activity Log ke CSV", request)
-    header = [tr("Waktu (WIB)", "Time (WIB)"), "User", tr("Peran", "Role"), tr("Aksi", "Action"),
+    header = [tr(f"Waktu ({tzn})", f"Time ({tzn})"), "User", tr("Peran", "Role"), tr("Aksi", "Action"),
               tr("Tingkat", "Severity"), "Detail", "Server", "IP"]
-    rows = ([fmt_time(i["timestamp"]), i["username"], i["user_role"], i["action_type"], i["severity"],
+    rows = ([fmt_time(i["timestamp"], tz), i["username"], i["user_role"], i["action_type"], i["severity"],
              i["detail"], i["target_name"], i["client_ip"]] for i in data["items"])
-    return csv_response("activity-log", header, rows)
+    return csv_response("activity-log", header, rows, tz)
 
 
 @router.get("/audit-logs/failed-logins")
@@ -240,16 +243,18 @@ async def export_remote_history(
     username: str = Query("", max_length=128),
     user: dict = Depends(require_sysadmin),
 ):
+    tz = ss.tzinfo(await ss.get_settings())
+    tzn = tz.key
     data = await remote_history.history(MAX_ROWS, 0, search.strip(), username.strip())
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
                        f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat Remote ke CSV", request)
     header = ["User", "VM", tr("Akun OS", "OS account"), "Host", tr("Protokol", "Protocol"),
-              tr("IP Klien", "Client IP"), tr("Mulai (WIB)", "Start (WIB)"), tr("Selesai (WIB)", "End (WIB)"),
+              tr("IP Klien", "Client IP"), tr(f"Mulai ({tzn})", f"Start ({tzn})"), tr(f"Selesai ({tzn})", f"End ({tzn})"),
               tr("Durasi (detik)", "Duration (seconds)")]
     rows = ([h["username"], h["vm"], h.get("os_account", ""), h["host"], h.get("protocol", ""),
-             h.get("remote_host", ""), fmt_time(h["start_date"]), fmt_time(h["end_date"]), h["duration_s"]]
+             h.get("remote_host", ""), fmt_time(h["start_date"], tz), fmt_time(h["end_date"], tz), h["duration_s"]]
             for h in data["items"])
-    return csv_response("remote", header, rows)
+    return csv_response("remote", header, rows, tz)
 
 
 # ── Open Web sessions (proxy ke IP privat) ──────────────────────────────────
@@ -275,17 +280,19 @@ async def openweb_history(
 @router.get("/openweb/history/export")
 async def export_openweb_history(request: Request, username: str = Query("", max_length=128),
                                  user: dict = Depends(require_sysadmin)):
+    tz = ss.tzinfo(await ss.get_settings())
+    tzn = tz.key
     from routers.openweb import list_sessions
     data = await list_sessions(active_only=False, limit=MAX_ROWS, offset=0, username=username.strip())
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
                        f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat Open Web ke CSV", request)
-    header = ["User", tr("Peran", "Role"), tr("Tujuan", "Target"), tr("Dibuat (WIB)", "Created (WIB)"),
-              tr("Berlaku s/d (WIB)", "Valid until (WIB)"), tr("Akses terakhir (WIB)", "Last access (WIB)"),
+    header = ["User", tr("Peran", "Role"), tr("Tujuan", "Target"), tr(f"Dibuat ({tzn})", f"Created ({tzn})"),
+              tr(f"Berlaku s/d ({tzn})", f"Valid until ({tzn})"), tr(f"Akses terakhir ({tzn})", f"Last access ({tzn})"),
               "Request", tr("IP Pengakses", "Accessed from"), "Status", tr("Dicabut oleh", "Revoked by")]
-    rows = ([s["username"], s["role"], s["target_ip"], fmt_time(s["created_at"]), fmt_time(s["expires_at"]),
-             fmt_time(s["last_seen"]), s["hits"], s["client_ips"], s["status"], s["revoked_by"]]
+    rows = ([s["username"], s["role"], s["target_ip"], fmt_time(s["created_at"], tz), fmt_time(s["expires_at"], tz),
+             fmt_time(s["last_seen"], tz), s["hits"], s["client_ips"], s["status"], s["revoked_by"]]
             for s in data["items"])
-    return csv_response("open-web", header, rows)
+    return csv_response("open-web", header, rows, tz)
 
 
 class OpenWebKillReq(BaseModel):
@@ -347,20 +354,22 @@ async def ssh_history(
 @router.get("/ssh/history/export")
 async def export_ssh_history(request: Request, username: str = Query("", max_length=128),
                              user: dict = Depends(require_sysadmin)):
+    tz = ss.tzinfo(await ss.get_settings())
+    tzn = tz.key
     from services.ssh_audit import list_sessions
     data = await list_sessions(active_only=False, limit=MAX_ROWS, offset=0, username=username.strip())
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
                        f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat SSH ke CSV", request)
     header = ["User", tr("Peran", "Role"), tr("Dari IP", "From IP"), "Key", "Fingerprint", tr("Tujuan", "Targets"),
-              tr("Ditolak", "Denied"), tr("Mulai (WIB)", "Start (WIB)"), tr("Selesai (WIB)", "End (WIB)"),
+              tr("Ditolak", "Denied"), tr(f"Mulai ({tzn})", f"Start ({tzn})"), tr(f"Selesai ({tzn})", f"End ({tzn})"),
               tr("Durasi (detik)", "Duration (seconds)"), tr("Data terkirim (byte)", "Bytes sent"),
               tr("Data diterima (byte)", "Bytes received"), "Status", tr("Diputus oleh", "Killed by")]
     rows = ([s["username"], s["role"], s["client_ip"], s["key_name"], s["fingerprint"],
              [f"{t['target']} ({t['vm']})" if t["vm"] else t["target"] for t in s["targets"]],
-             s["denied_targets"], fmt_time(s["started_at"]), fmt_time(s["ended_at"]), s["duration"],
+             s["denied_targets"], fmt_time(s["started_at"], tz), fmt_time(s["ended_at"], tz), s["duration"],
              s["bytes_sent"], s["bytes_received"], s["status"], s["killed_by"]]
             for s in data["items"])
-    return csv_response("ssh", header, rows)
+    return csv_response("ssh", header, rows, tz)
 
 
 class SshKillReq(BaseModel):

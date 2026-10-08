@@ -8,7 +8,8 @@ import {
     fetchAllProxmoxVms,
 } from '../api';
 import useIsMobile from '../useIsMobile';
-import { useSysConfig } from '../sysconfig';
+import { osLogoUrl, useSysConfig } from '../sysconfig';
+import OsOptionsModal, { OsLogo } from './OsOptionsModal';
 import { formatCcdId } from '../format';
 import { locale, t as translate, useT } from '../i18n';
 import PaneTabs from './PaneTabs';
@@ -70,8 +71,8 @@ function CreateModal({ onClose, onCreated }) {
     const t = useT();
     const [type,    setType]    = useState('VPS');
     const [specs,   setSpecs]   = useState({ cpu: '', ram_gb: '', storage_gb: '', os: '' });
-    // Pilihan OS diatur superadmin di Pengaturan Sistem; yang pertama terpilih kalau belum memilih.
-    const osOptions = useSysConfig().vps_os_options;
+    // Pilihan OS diatur superadmin lewat tombol Kelola pilihan OS di halaman ini; yang pertama terpilih kalau belum memilih.
+    const { vps_os_options: osOptions, os_logos: osLogos } = useSysConfig();
     const os = osOptions.includes(specs.os) ? specs.os : osOptions[0];
     const [notes,   setNotes]   = useState('');
     const [docFile, setDocFile] = useState(null);
@@ -153,7 +154,10 @@ function CreateModal({ onClose, onCreated }) {
                                                 background: os === name ? 'rgba(0,229,255,0.1)' : 'var(--bg-hover)',
                                                 color: os === name ? 'var(--cyan)' : 'var(--text3)',
                                             }}>
-                                            {name}
+                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+                                                {osLogoUrl(name, osLogos) && <OsLogo url={osLogoUrl(name, osLogos)} name={name} size={20} />}
+                                                {name}
+                                            </span>
                                         </button>
                                     ))}
                                 </div>
@@ -611,6 +615,7 @@ export default function InfraRequestsPage({ currentUser }) {
     const [loading,      setLoading]      = useState(true);
     const [filterStatus, setFilterStatus] = useState('');
     const [showCreate,   setShowCreate]   = useState(false);
+    const [managingOs,   setManagingOs]   = useState(false);
     const [detail,       setDetail]       = useState(null);
     const [justVerified, setJustVerified] = useState(false);
     const [counts,       setCounts]       = useState({ PENDING: 0, ON_PROGRESS: 0, DONE: 0, DECLINE: 0 });
@@ -706,6 +711,12 @@ export default function InfraRequestsPage({ currentUser }) {
                         style={{ padding: '7px 12px', borderRadius: 7, background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text2)', fontSize: 11, cursor: 'pointer' }}>
                         {t('infra.refresh')}
                     </button>
+                    {currentUser?.role === 'superadmin' && (
+                        <button onClick={() => setManagingOs(true)}
+                            style={{ padding: '7px 12px', borderRadius: 7, background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text2)', fontSize: 11, cursor: 'pointer' }}>
+                            {t('osopt.open')}
+                        </button>
+                    )}
                     {!isAdmin && (
                         <button onClick={() => setShowCreate(true)}
                             style={{ padding: '7px 14px', borderRadius: 7, background: 'var(--cyan)', color: '#000', fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer' }}>
@@ -796,6 +807,7 @@ export default function InfraRequestsPage({ currentUser }) {
             {showCreate && (
                 <CreateModal onClose={() => setShowCreate(false)} onCreated={refresh} />
             )}
+            {managingOs && <OsOptionsModal onClose={() => setManagingOs(false)} />}
             {detail && (
                 <DetailModal
                     req={detail}

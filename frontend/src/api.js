@@ -474,6 +474,16 @@ export const uploadSystemLogo = (file) => {
 export const deleteSystemLogo = () => api.delete('/api/v1/system/logo').then(r => r.data);
 export const fetchSystemSettings = () => api.get('/api/v1/system/settings').then(r => r.data);
 export const saveSystemSettings = (body) => api.put('/api/v1/system/settings', body).then(r => r.data);
+export const saveTicketCategories = (categories) =>
+    api.put('/api/v1/system/ticket-categories', { categories }).then(r => r.data);
+export const saveOsOptions = (options) => api.put('/api/v1/system/os-options', { options }).then(r => r.data);
+export const uploadOsLogo = (name, file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return api.post('/api/v1/system/os-logo', form, { params: { name } }).then(r => r.data);
+};
+export const deleteOsLogo = (name) => api.delete('/api/v1/system/os-logo', { params: { name } }).then(r => r.data);
+export const fetchAuditStats = () => api.get('/api/v1/system/audit-stats').then(r => r.data);
 
 // ── Siklus akun dan masa sewa VM ─────────────────────────────────────────────
 export const bulkUsers = (body) => api.post('/api/v1/users/bulk', body).then(r => r.data);

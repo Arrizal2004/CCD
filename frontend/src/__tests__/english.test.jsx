@@ -10,7 +10,8 @@ vi.mock('../api', () => ({
     fetchPasswordHelp: vi.fn(), dismissPasswordHelp: vi.fn(),
     fetchNetworks: vi.fn(), checkNetworkSetup: vi.fn(), addNetworkPool: vi.fn(), removeNetworkPool: vi.fn(),
     createNetwork: vi.fn(), updateNetwork: vi.fn(), deleteNetwork: vi.fn(), fetchNetworkVms: vi.fn(),
-    fetchSystemSettings: vi.fn(), saveSystemSettings: vi.fn(), uploadSystemLogo: vi.fn(), deleteSystemLogo: vi.fn(),
+    fetchSystemSettings: vi.fn(), saveSystemSettings: vi.fn(),
+    fetchAuditStats: vi.fn(() => Promise.resolve({ rows: 5, oldest: '2026-09-30T01:00:00Z', bytes: 2048, env_default: 180, effective_days: 180 })), uploadSystemLogo: vi.fn(), deleteSystemLogo: vi.fn(),
 }));
 
 import * as api from '../api';

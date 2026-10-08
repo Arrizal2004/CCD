@@ -171,7 +171,7 @@ def test_audit_export_csv(client, sysadmin_token):
     assert 'filename="ccd-activity-log-' in r.headers["content-disposition"]
     assert r.content.startswith("﻿".encode())
     rows = list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))
-    assert rows[0][:4] == ["Time (WIB)", "User", "Role", "Action"]
+    assert rows[0][:4] == ["Time (Asia/Jakarta)", "User", "Role", "Action"]
     assert len(rows) == 2 and rows[1][1] == "'" + evil and rows[1][3] == "AUTH_LOGIN_FAILED"   # tidak jadi rumus
     assert datetime.strptime(rows[1][0], "%Y-%m-%d %H:%M:%S")
     assert _audit(client, sysadmin_token, action="AUDIT_EXPORT")

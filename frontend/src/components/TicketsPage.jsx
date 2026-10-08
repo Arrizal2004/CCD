@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchTickets, fetchTicket, createTicket, updateTicketStatus, replyTicket, uploadTicketAttachment, fetchMyProxmoxVms } from '../api';
 import { formatCcdId } from '../format';
 import { currentLang, locale, useT } from '../i18n';
-import { categoryLabel, useSysConfig } from '../sysconfig';
+import { appTimeZone, categoryLabel, useSysConfig } from '../sysconfig';
 import useIsMobile from '../useIsMobile';
 import PaneTabs from './PaneTabs';
 import Icon from './Icons';
+import TicketCategoriesModal from './TicketCategoriesModal';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const WS_BASE  = API_BASE
@@ -83,7 +84,7 @@ function vmLabel(t, isAdmin) {
 
 function fmt(iso) {
     if (!iso) return '—';
-    try { return new Date(iso).toLocaleString(locale(), { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    try { return new Date(iso).toLocaleString(locale(), { timeZone: appTimeZone(), day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
     catch { return iso; }
 }
 function Badge({ text, color }) {
@@ -117,6 +118,7 @@ export default function TicketsPage({ currentUser }) {
     const [search,   setSearch]   = useState('');
     const [openId,   setOpenId]   = useState(null);
     const [creating, setCreating] = useState(false);
+    const [managingCats, setManagingCats] = useState(false);
 
     // Load per-status counts in parallel — each request only needs total, not items
     const loadStats = useCallback(async () => {
@@ -208,6 +210,12 @@ export default function TicketsPage({ currentUser }) {
                     style={{ padding: '6px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text3)', fontFamily: 'var(--fmono)' }}>
                     ↻ {tr('common.refresh')}
                 </button>
+                {currentUser?.role === 'superadmin' && (
+                    <button onClick={() => setManagingCats(true)}
+                        style={{ padding: '6px 12px', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text2)', fontFamily: 'var(--fmono)' }}>
+                        {tr('tcat.open')}
+                    </button>
+                )}
             </div>
 
             {/* ── Table ── */}
@@ -254,6 +262,7 @@ export default function TicketsPage({ currentUser }) {
                 )}
             </div>
 
+            {managingCats && <TicketCategoriesModal onClose={() => setManagingCats(false)} />}
             {creating && <CreateTicketModal isAdmin={isAdmin} onClose={() => setCreating(false)} onCreated={() => { setCreating(false); refresh(); }} />}
             {openId    && <TicketThread ticketId={openId} currentUser={currentUser} onClose={() => { setOpenId(null); }} onChanged={refresh} />}
         </div>

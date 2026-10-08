@@ -9,6 +9,7 @@ import ipaddress
 import json
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, available_timezones
 
 from database import get_pool
 from i18n import tr
@@ -33,8 +34,14 @@ DEFAULTS = {
     # Alamat bastion SSH di perintah SSH pengguna. Kosong = BASTION_PUBLIC_HOST di .env, lalu alamat yang
     # dibuka pengguna di browser. Bisa diganti di sini saat domain berubah, tanpa menyunting .env.
     "ssh_public_host": "",
+    # Berapa hari Activity Log dan riwayat sesi (Remote, Web, SSH) disimpan sebelum dihapus otomatis.
+    # Kosong = AUDIT_RETENTION_DAYS di .env (bawaan 180).
+    "audit_retention_days": None,
+    # Zona waktu (IANA) untuk jam di header dan semua waktu yang tampil atau diekspor.
+    "timezone": "Asia/Jakarta",
 }
 REQUIRED_CATEGORIES = ("LEASE_EXTENSION", "OTHERS")
+MIN_RETENTION_DAYS = 7      # lebih pendek dari ini hampir pasti salah ketik dan menghapus jejak yang masih dibutuhkan
 MAX_CATEGORIES = 20
 MAX_OS_OPTIONS = 20
 LEVELS = ("info", "warning", "critical")
@@ -48,6 +55,8 @@ _RULE_DOMAIN = re.compile(rf"^@{_DOMAIN}$")
 _RULE_ADDRESS = re.compile(rf"^[a-z0-9._%+-]{{1,64}}@{_DOMAIN}$")
 _HOSTNAME = re.compile(r"^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$")
 
+OS_LOGO_MAX_BYTES = 256 * 1024
+
 _cache: dict | None = None
 
 
@@ -60,8 +69,11 @@ async def get_settings() -> dict:
                 "SELECT data, extract(epoch FROM logo_updated_at)::bigint AS logo_version FROM system_settings WHERE id = 1")
         raw = row["data"] if row else None
         stored = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        async with pool.acquire() as conn:
+            logos = {r["key"]: r["version"] for r in await conn.fetch(
+                "SELECT key, extract(epoch FROM updated_at)::bigint AS version FROM os_logos")}
         _cache = {**DEFAULTS, **{k: v for k, v in stored.items() if k in DEFAULTS},
-                  "logo_version": row["logo_version"] if row else None}
+                  "logo_version": row["logo_version"] if row else None, "os_logos": logos}
     return dict(_cache)
 
 
@@ -84,6 +96,21 @@ def _days(val, name: str):
     if not 1 <= n <= 3650:
         raise ValueError(tr(f"{name} harus antara 1 dan 3650 hari",
                             f"{name} must be between 1 and 3650 days"))
+    return n
+
+
+def _retention(val):
+    """Hari penyimpanan log audit; kosong = ikut .env."""
+    if val in (None, "", 0, "0"):
+        return None
+    try:
+        n = int(val)
+    except (TypeError, ValueError):
+        raise ValueError(tr("Lama penyimpanan log harus berupa angka hari",
+                            "The log retention must be a number of days"))
+    if not MIN_RETENTION_DAYS <= n <= 3650:
+        raise ValueError(tr(f"Lama penyimpanan log harus antara {MIN_RETENTION_DAYS} dan 3650 hari",
+                            f"The log retention must be between {MIN_RETENTION_DAYS} and 3650 days"))
     return n
 
 
@@ -120,10 +147,13 @@ def _categories(items) -> list[dict]:
     return out
 
 
-def _os_options(items) -> list[str]:
+def _os_entries(items) -> list[dict]:
+    """Daftar pilihan OS. Setiap item berupa nama, atau {"name": ..., "from": nama lama} kalau OS ini
+    hasil mengganti nama (logonya ikut pindah ke nama baru)."""
     out, seen = [], set()
     for item in items or []:
-        label = " ".join(str(item or "").split())
+        raw, old = (item.get("name"), item.get("from")) if isinstance(item, dict) else (item, None)
+        label = " ".join(str(raw or "").split())
         if not label:
             continue
         if len(label) > 40:
@@ -131,13 +161,33 @@ def _os_options(items) -> list[str]:
                                 f"OS name '{label[:20]}…' may be at most 40 characters"))
         if label.lower() not in seen:
             seen.add(label.lower())
-            out.append(label)
+            out.append({"name": label, "from": " ".join(str(old or "").split()) or None})
     if not out:
         raise ValueError(tr("Isi minimal satu pilihan OS untuk Infra Request",
                             "Add at least one OS choice for infrastructure requests"))
     if len(out) > MAX_OS_OPTIONS:
         raise ValueError(tr(f"Maksimal {MAX_OS_OPTIONS} pilihan OS", f"At most {MAX_OS_OPTIONS} OS choices"))
     return out
+
+
+def _os_options(items) -> list[str]:
+    return [e["name"] for e in _os_entries(items)]
+
+
+def _timezone(val) -> str:
+    name = str(val or "").strip() or DEFAULTS["timezone"]
+    if name not in available_timezones():
+        raise ValueError(tr(f"Zona waktu '{name[:40]}' tidak dikenal; pakai nama IANA seperti Asia/Jakarta",
+                            f"The time zone '{name[:40]}' is unknown; use an IANA name such as Asia/Jakarta"))
+    return name
+
+
+def tzinfo(s: dict | None = None) -> ZoneInfo:
+    """Zona waktu yang berlaku (pengaturan Sistem). Cadangan: Asia/Jakarta."""
+    try:
+        return ZoneInfo((s or _cache or {}).get("timezone") or DEFAULTS["timezone"])
+    except Exception:
+        return ZoneInfo(DEFAULTS["timezone"])
 
 
 def _ssh_host(val) -> str:
@@ -238,10 +288,18 @@ def normalize(body: dict) -> dict:
                                                                                "The default lease"))
     out["default_account_days"] = _days(body.get("default_account_days"), tr("Masa berlaku akun bawaan",
                                                                              "The default account validity"))
-    out["ticket_categories"] = _categories(body.get("ticket_categories", DEFAULTS["ticket_categories"]))
-    out["vps_os_options"] = _os_options(body.get("vps_os_options", DEFAULTS["vps_os_options"]))
+    # Kategori tiket dan pilihan OS diatur dari halaman Helpdesk dan Infra Requests (endpoint sendiri),
+    # jadi tidak ikut disimpan atau diubah dari sini.
+    out["timezone"] = _timezone(body.get("timezone"))
     out["ssh_public_host"] = _ssh_host(body.get("ssh_public_host"))
+    out["audit_retention_days"] = _retention(body.get("audit_retention_days"))
     return out
+
+
+async def audit_retention_days() -> int:
+    """Hari penyimpanan log audit yang berlaku: pengaturan Sistem, kalau kosong AUDIT_RETENTION_DAYS."""
+    from database import AUDIT_RETENTION_DAYS
+    return (await get_settings()).get("audit_retention_days") or AUDIT_RETENTION_DAYS
 
 
 def active_announcement(s: dict) -> dict | None:
@@ -304,15 +362,71 @@ async def get_logo() -> tuple[bytes, str] | None:
 
 
 async def save_settings(data: dict, username: str) -> dict:
+    """Simpan `data` di atas pengaturan yang sudah ada; kunci yang tidak ada di `data` dibiarkan
+    (mis. kategori tiket dan pilihan OS, yang disimpan lewat save_ticket_categories dan save_os_options)."""
+    global _cache
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            raw = await conn.fetchval("SELECT data FROM system_settings WHERE id = 1 FOR UPDATE")
+            existing = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            await conn.execute(
+                """INSERT INTO system_settings (id, data, updated_at, updated_by) VALUES (1, $1::jsonb, NOW(), $2)
+                   ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW(), updated_by = EXCLUDED.updated_by""",
+                json.dumps({**existing, **data}), username)
+    _cache = None
+    return await get_settings()
+
+
+async def save_ticket_categories(items, username: str) -> dict:
+    return await save_settings({"ticket_categories": _categories(items)}, username)
+
+
+async def save_os_options(items, username: str) -> dict:
+    """Simpan daftar OS. Logo ikut pindah ke nama baru untuk OS yang diganti namanya, dan logo OS yang
+    sudah tidak ada di daftar dihapus."""
+    global _cache
+    entries = _os_entries(items)
+    keep = {e["name"].lower() for e in entries}
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            for e in entries:
+                old = (e["from"] or "").lower()
+                if old and old != e["name"].lower() and old not in keep:
+                    await conn.execute(
+                        "UPDATE os_logos SET key = $2, updated_at = NOW() WHERE key = $1 "
+                        "AND NOT EXISTS (SELECT 1 FROM os_logos WHERE key = $2)", old, e["name"].lower())
+            await conn.execute("DELETE FROM os_logos WHERE NOT (key = ANY($1::text[]))", sorted(keep))
+    _cache = None
+    return await save_settings({"vps_os_options": [e["name"] for e in entries]}, username)
+
+
+async def save_os_logo(name: str, data: bytes, mime: str) -> None:
     global _cache
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO system_settings (id, data, updated_at, updated_by) VALUES (1, $1::jsonb, NOW(), $2)
-               ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW(), updated_by = EXCLUDED.updated_by""",
-            json.dumps(data), username)
+            """INSERT INTO os_logos (key, content_type, data) VALUES ($1, $2, $3)
+               ON CONFLICT (key) DO UPDATE SET content_type = EXCLUDED.content_type, data = EXCLUDED.data, updated_at = NOW()""",
+            name.lower(), mime, data)
     _cache = None
-    return await get_settings()
+
+
+async def delete_os_logo(name: str) -> bool:
+    global _cache
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        deleted = await conn.fetchval("DELETE FROM os_logos WHERE key = $1 RETURNING key", name.lower())
+    _cache = None
+    return bool(deleted)
+
+
+async def get_os_logo(name: str) -> tuple[bytes, str] | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT data, content_type FROM os_logos WHERE key = $1", name.lower())
+    return (bytes(row["data"]), row["content_type"]) if row else None
 
 
 def email_allowed(email: str, rules: list[str]) -> bool:

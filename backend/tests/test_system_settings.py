@@ -13,7 +13,10 @@ from tests.conftest import auth
 def restore_settings(client, superadmin_token):
     """Kembalikan pengaturan bawaan setelah test, karena tabelnya dipakai bersama test lain."""
     yield
-    client.put("/api/v1/system/settings", json=DEFAULTS, headers=auth(superadmin_token))
+    h = auth(superadmin_token)
+    client.put("/api/v1/system/settings", json=DEFAULTS, headers=h)
+    client.put("/api/v1/system/ticket-categories", json={"categories": DEFAULTS["ticket_categories"]}, headers=h)
+    client.put("/api/v1/system/os-options", json={"options": DEFAULTS["vps_os_options"]}, headers=h)
     client.delete("/api/v1/system/logo", headers=auth(superadmin_token))
 
 
@@ -128,8 +131,11 @@ def test_default_account_days_on_registration(client, superadmin_token, restore_
     assert newest["expires_at"]
 
 
-def test_custom_ticket_categories(client, superadmin_token, student_token, restore_settings):
-    r = _put(client, superadmin_token, ticket_categories=[{"label": "Praktikum Jaringan"}, {"key": "REMOTE_ISSUE", "label": "Tidak bisa Connect"}])
+def test_custom_ticket_categories(client, superadmin_token, sysadmin_token, student_token, restore_settings):
+    body = {"categories": [{"label": "Praktikum Jaringan"}, {"key": "REMOTE_ISSUE", "label": "Tidak bisa Connect"}]}
+    url = "/api/v1/system/ticket-categories"
+    assert client.put(url, json=body, headers=auth(sysadmin_token)).status_code == 403     # hanya superadmin
+    r = client.put(url, json=body, headers=auth(superadmin_token))
     assert r.status_code == 200
     cats = r.json()["ticket_categories"]
     keys = [c["key"] for c in cats]
@@ -141,6 +147,12 @@ def test_custom_ticket_categories(client, superadmin_token, student_token, resto
         return client.get(f"/api/tickets/{t['id']}", headers=auth(student_token)).json()["ticket"]["category"]
     assert created_category("PRAKTIKUM_JARINGAN") == "PRAKTIKUM_JARINGAN"
     assert created_category("PERFORMANCE") == "OTHERS"                    # sudah dihapus dari daftar
+
+    # Menyimpan pengaturan Sistem tidak menyentuh kategori (diatur dari Helpdesk).
+    assert _put(client, superadmin_token, name="Nama Lain").status_code == 200
+    assert client.get("/api/v1/system/config", headers=auth(student_token)).json()["ticket_categories"] == cats
+    bad = client.put(url, json={"categories": [{"label": "x"}]}, headers=auth(superadmin_token))
+    assert bad.status_code == 400
 
 
 PNG_1PX = bytes.fromhex("89504e470d0a1a0a0000000d4948445200000001000000010806000000"
@@ -178,12 +190,16 @@ def test_default_theme(client, superadmin_token, restore_settings):
 def test_vps_os_options(client, superadmin_token, student_token, restore_settings):
     config = lambda: client.get("/api/v1/system/config", headers=auth(student_token)).json()["vps_os_options"]
     assert config() == ["Windows", "Ubuntu"]                                               # bawaan tidak berubah
-    r = _put(client, superadmin_token, vps_os_options=[" Rocky  Linux 9 ", "openSUSE Leap 16", "rocky linux 9", "", "Windows Server 2022"])
+    put = lambda options: client.put("/api/v1/system/os-options", json={"options": options}, headers=auth(superadmin_token))
+    assert client.put("/api/v1/system/os-options", json={"options": ["A"]}, headers=auth(student_token)).status_code == 403
+    r = put([" Rocky  Linux 9 ", "openSUSE Leap 16", "rocky linux 9", "", "Windows Server 2022"])
     assert r.status_code == 200, r.text
     assert r.json()["vps_os_options"] == ["Rocky Linux 9", "openSUSE Leap 16", "Windows Server 2022"]
     assert config()[0] == "Rocky Linux 9"
-    assert _put(client, superadmin_token, vps_os_options=[]).status_code == 400
-    assert _put(client, superadmin_token, vps_os_options=["x" * 41]).status_code == 400
+    assert put([]).status_code == 400
+    assert put(["x" * 41]).status_code == 400
+    assert _put(client, superadmin_token, name="Nama Lain").status_code == 200
+    assert config()[0] == "Rocky Linux 9"                                                  # pengaturan Sistem tidak menimpa
 
     def request(os_name):
         return client.post("/api/v1/infra-requests", headers=auth(student_token), json={
@@ -234,3 +250,130 @@ def test_ssh_public_host_overrides_env(client, superadmin_token, student_token, 
     assert _put(client, superadmin_token, ssh_public_host="https://ssh.baru.example").status_code == 400
     assert _put(client, superadmin_token, ssh_public_host="").status_code == 200
     assert host() == "ssh.lama.example"
+
+
+# ── Lama penyimpanan log audit ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("value,expected", [
+    (None, None), ("", None), (0, None), ("0", None),
+    (7, 7), ("90", 90), (3650, 3650),
+])
+def test_audit_retention_accepts(value, expected):
+    assert normalize({**DEFAULTS, "audit_retention_days": value})["audit_retention_days"] == expected
+
+
+@pytest.mark.parametrize("value", [1, 6, 3651, "abc", -5])
+def test_audit_retention_rejects(value):
+    with pytest.raises(ValueError):
+        normalize({**DEFAULTS, "audit_retention_days": value})
+
+
+def test_audit_stats_requires_superadmin(client, sysadmin_token, student_token, superadmin_token):
+    assert client.get("/api/v1/system/audit-stats", headers=auth(student_token)).status_code == 403
+    assert client.get("/api/v1/system/audit-stats", headers=auth(sysadmin_token)).status_code == 403
+    r = client.get("/api/v1/system/audit-stats", headers=auth(superadmin_token))
+    assert r.status_code == 200
+    data = r.json()
+    assert data["rows"] >= 1 and data["bytes"] > 0 and data["oldest"]
+    assert data["effective_days"] == data["env_default"]          # belum diatur: ikut .env
+
+
+def test_purge_follows_the_setting(client, superadmin_token, restore_settings):
+    import asyncpg
+    from tests.conftest import DATABASE_URL, _run
+    from database import purge_old_audit_logs
+
+    async def seed():
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            await conn.execute("DELETE FROM audit_logs WHERE username = 'tst_retention'")
+            for days in (30, 2):
+                await conn.execute(
+                    "INSERT INTO audit_logs (username, action_type, severity_level, created_at) "
+                    "VALUES ('tst_retention', 'TEST_RETENTION', 'INFO', NOW() - make_interval(days => $1))", days)
+        finally:
+            await conn.close()
+
+    async def count():
+        conn = await asyncpg.connect(DATABASE_URL)
+        try:
+            return await conn.fetchval("SELECT count(*) FROM audit_logs WHERE username = 'tst_retention'")
+        finally:
+            await conn.close()
+
+    _run(seed())
+    body = {**DEFAULTS, "audit_retention_days": 7}
+    assert client.put("/api/v1/system/settings", json=body, headers=auth(superadmin_token)).status_code == 200
+    assert client.get("/api/v1/system/audit-stats", headers=auth(superadmin_token)).json()["effective_days"] == 7
+    client.portal.call(purge_old_audit_logs)
+    assert _run(count()) == 1                                      # yang 30 hari hilang, yang 2 hari tetap
+
+    # Dikosongkan: kembali ke AUDIT_RETENTION_DAYS (180), jadi yang tersisa tidak ikut terhapus.
+    assert client.put("/api/v1/system/settings", json=DEFAULTS, headers=auth(superadmin_token)).status_code == 200
+    client.portal.call(purge_old_audit_logs)
+    assert _run(count()) == 1
+    _run(seed())
+    assert client.put("/api/v1/system/settings", json=DEFAULTS, headers=auth(superadmin_token)).status_code == 200
+    client.portal.call(purge_old_audit_logs)
+    assert _run(count()) == 2                                      # 30 hari < 180 hari: tetap ada
+
+
+# ── Logo OS ──────────────────────────────────────────────────────────────────
+
+def test_os_logo_lifecycle(client, superadmin_token, sysadmin_token, student_token, restore_settings):
+    h = auth(superadmin_token)
+    put = lambda options: client.put("/api/v1/system/os-options", json={"options": options}, headers=h)
+    cfg = lambda: client.get("/api/v1/system/config", headers=auth(student_token)).json()
+    assert put(["Ubuntu 24", "Rocky 9"]).status_code == 200
+    png = {"file": ("u.png", PNG_1PX, "image/png")}
+
+    assert client.post("/api/v1/system/os-logo?name=Ubuntu 24", files=png, headers=auth(sysadmin_token)).status_code == 403
+    assert client.post("/api/v1/system/os-logo?name=Tidak Ada", files=png, headers=h).status_code == 404
+    r = client.post("/api/v1/system/os-logo?name=ubuntu 24", files=png, headers=h)      # huruf kecil tetap cocok
+    assert r.status_code == 200 and list(r.json()["os_logos"]) == ["Ubuntu 24"]
+    assert list(cfg()["os_logos"]) == ["Ubuntu 24"]
+
+    img = client.get("/api/v1/system/os-logo?name=Ubuntu 24")                         # tanpa login, seperti logo sistem
+    assert img.status_code == 200 and img.content == PNG_1PX and img.headers["content-type"] == "image/png"
+    assert img.headers["x-content-type-options"] == "nosniff"
+    assert client.get("/api/v1/system/os-logo?name=Rocky 9").status_code == 404
+
+    svg = {"file": ("u.svg", b"<svg onload='alert(1)'/>", "image/svg+xml")}
+    assert client.post("/api/v1/system/os-logo?name=Rocky 9", files=svg, headers=h).status_code == 400
+    big = {"file": ("b.png", PNG_1PX + b"0" * (300 * 1024), "image/png")}
+    assert client.post("/api/v1/system/os-logo?name=Rocky 9", files=big, headers=h).status_code == 400
+
+    # Ganti nama: logo ikut pindah. Hapus dari daftar: logonya ikut dihapus.
+    assert put([{"name": "Ubuntu Server 24", "from": "Ubuntu 24"}, "Rocky 9"]).status_code == 200
+    assert list(cfg()["os_logos"]) == ["Ubuntu Server 24"]
+    assert client.get("/api/v1/system/os-logo?name=Ubuntu Server 24").content == PNG_1PX
+    assert put(["Rocky 9"]).status_code == 200
+    assert cfg()["os_logos"] == {} and client.get("/api/v1/system/os-logo?name=Ubuntu Server 24").status_code == 404
+
+    client.post("/api/v1/system/os-logo?name=Rocky 9", files=png, headers=h)
+    assert client.delete("/api/v1/system/os-logo?name=Rocky 9", headers=h).status_code == 200
+    assert cfg()["os_logos"] == {}
+
+
+# ── Zona waktu ───────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("value,expected", [
+    (None, "Asia/Jakarta"), ("", "Asia/Jakarta"), ("Asia/Makassar", "Asia/Makassar"), (" UTC ", "UTC"),
+])
+def test_timezone_accepts(value, expected):
+    assert normalize({**DEFAULTS, "timezone": value})["timezone"] == expected
+
+
+@pytest.mark.parametrize("value", ["WIB", "Asia/Jakartaa", "../etc/passwd", "x" * 100])
+def test_timezone_rejects(value):
+    with pytest.raises(ValueError):
+        normalize({**DEFAULTS, "timezone": value})
+
+
+def test_timezone_in_config_and_csv(client, superadmin_token, student_token, restore_settings):
+    assert client.get("/api/v1/system/config", headers=auth(student_token)).json()["timezone"] == "Asia/Jakarta"
+    assert _put(client, superadmin_token, timezone="Asia/Jayapura").status_code == 200
+    assert client.get("/api/v1/system/config", headers=auth(student_token)).json()["timezone"] == "Asia/Jayapura"
+    csv_head = client.get("/api/admin/audit-logs/export", headers={**auth(superadmin_token), "Accept-Language": "en"}).content
+    assert csv_head.decode("utf-8-sig").splitlines()[0].startswith("Time (Asia/Jayapura),User")
+    assert _put(client, superadmin_token, timezone="Mars/Olympus").status_code == 400

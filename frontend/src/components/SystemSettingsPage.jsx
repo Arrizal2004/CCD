@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { fetchSystemSettings, saveSystemSettings, uploadSystemLogo, deleteSystemLogo } from '../api';
+import { fetchSystemSettings, saveSystemSettings, fetchAuditStats, uploadSystemLogo, deleteSystemLogo } from '../api';
 import { DEFAULT_BRANDING, loadBranding } from '../branding';
-import { tNodes, useT } from '../i18n';
+import { locale, tNodes, useT } from '../i18n';
+import { appTimeZone, loadSysConfig } from '../sysconfig';
+import Clock from './Clock';
+import { formatBytes } from '../format';
 import BrandLogo from './BrandLogo';
 import AnnouncementBanner from './AnnouncementBanner';
 
-// Pengaturan Sistem (superadmin): identitas, tampilan, bahasa, pengumuman, aturan pendaftaran, nilai
-// bawaan, kategori tiket, pilihan OS, dan alamat SSH, supaya setiap sekolah atau kampus bisa menyesuaikan
-// dashboard ini.
+// Pengaturan Sistem (superadmin): identitas, tampilan, bahasa, zona waktu, pengumuman, aturan pendaftaran,
+// nilai bawaan, lama penyimpanan log audit, dan alamat SSH, supaya setiap sekolah atau kampus bisa
+// menyesuaikan dashboard ini. Kategori tiket diatur dari halaman Helpdesk dan pilihan OS dari Infra Requests.
 const LIMITS = { name: 60, short_name: 12, institution: 100, tagline: 100 };
 const label = { display: 'block', fontSize: 11, color: 'var(--text3)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.06em' };
 const input = { width: '100%', boxSizing: 'border-box', background: 'var(--bg-card2)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 10px', color: 'var(--text)', fontSize: 13, outline: 'none' };
@@ -16,10 +19,13 @@ const hint = { fontSize: 11, color: 'var(--text3)', marginTop: 4, lineHeight: 1.
 const small = { padding: '5px 12px', fontSize: 11, borderRadius: 6, cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)' };
 const title = { fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 14 };
 
+// Zona waktu Indonesia di urutan pertama; sisanya dari daftar zona yang dikenal browser.
+const INDONESIA_ZONES = [['Asia/Jakarta', 'WIB'], ['Asia/Makassar', 'WITA'], ['Asia/Jayapura', 'WIT']];
+const allZones = (typeof Intl !== 'undefined' && Intl.supportedValuesOf) ? Intl.supportedValuesOf('timeZone') : [];
+
 // Warna aksen siap pakai. Semuanya cukup terang supaya teks hitam di tombol tetap terbaca.
 const ACCENTS = ['#00e5ff', '#22c55e', '#facc15', '#fb923c', '#f472b6', '#a78bfa', '#60a5fa'];
 const LEVELS = [['info', 'sys.levelInfo'], ['warning', 'sys.levelWarning'], ['critical', 'sys.levelCritical']];
-const REQUIRED = ['LEASE_EXTENSION', 'OTHERS'];
 
 // ISO UTC <-> nilai <input type="datetime-local"> (waktu lokal browser).
 const toLocal = (iso) => {
@@ -82,6 +88,7 @@ export default function SystemSettingsPage() {
     const [emails, setEmails] = useState('');
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState(null);   // { ok, text }
+    const [auditStats, setAuditStats] = useState(null);
 
     const apply = (s) => {
         setForm(s);
@@ -92,6 +99,7 @@ export default function SystemSettingsPage() {
         let alive = true;
         fetchSystemSettings().then(s => { if (alive) apply(s); })
             .catch(e => { if (alive) setMsg({ ok: false, text: e?.response?.data?.detail || t('sys.loadFailed') }); });
+        fetchAuditStats().then(s => { if (alive) setAuditStats(s); }).catch(() => {});
         return () => { alive = false; };
     }, [t]);
 
@@ -99,10 +107,6 @@ export default function SystemSettingsPage() {
 
     const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setMsg(null); };
     const setAnn = (k, v) => set('announcement', { ...form.announcement, [k]: v });
-    const setCat = (i, v) => set('ticket_categories', form.ticket_categories.map((c, j) => (j === i ? { ...c, label: v } : c)));
-    const osList = form.vps_os_options;
-    const setOs = (i, v) => set('vps_os_options', osList.map((o, j) => (j === i ? v : o)));
-    const moveOsUp = (i) => set('vps_os_options', osList.map((o, j) => (j === i - 1 ? osList[i] : j === i ? osList[i - 1] : o)));
     const rules = emails.split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
     const domains = rules.filter(r => r.startsWith('@') || !r.includes('@'));
     const ann = form.announcement;
@@ -118,12 +122,8 @@ export default function SystemSettingsPage() {
     const save = async () => {
         setSaving(true); setMsg(null);
         try {
-            // Kategori baru dikirim tanpa kode (dibuatkan server dari namanya); baris baru yang kosong diabaikan.
-            const ticket_categories = form.ticket_categories
-                .filter(c => c.key || c.label.trim())
-                .map(({ key, label }) => ({ key, label }));
-            const vps_os_options = form.vps_os_options.map(o => o.trim()).filter(Boolean);
-            apply(await saveSystemSettings({ ...form, allowed_emails: rules, ticket_categories, vps_os_options }));
+            apply(await saveSystemSettings({ ...form, allowed_emails: rules }));
+            await loadSysConfig();  // zona waktu baru langsung dipakai jam dan semua waktu yang tampil
             await loadBranding();   // nama, warna, dan bahasa baru langsung dipakai
             setMsg({ ok: true, text: t('sys.saved') });
         } catch (e) {
@@ -268,40 +268,42 @@ export default function SystemSettingsPage() {
             </div>
 
             <div style={card}>
-                <div style={title}>{t('sys.categories')}</div>
-                {form.ticket_categories.map((c, i) => (
-                    <div key={c.key || c._id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                        <input value={c.label} maxLength={40} placeholder={t(`cat.${c.key}`) === `cat.${c.key}` ? t('sys.categoryPh') : t(`cat.${c.key}`)}
-                            onChange={e => setCat(i, e.target.value)} style={{ ...input, flex: 1 }} />
-                        <span style={{ fontSize: 10, fontFamily: 'var(--fmono)', color: 'var(--text3)', width: 130, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.key || t('sys.categoryNew')}</span>
-                        <button disabled={REQUIRED.includes(c.key)} onClick={() => set('ticket_categories', form.ticket_categories.filter((_, j) => j !== i))}
-                            title={REQUIRED.includes(c.key) ? t('sys.categoryLocked') : t('common.delete')}
-                            style={{ ...small, opacity: REQUIRED.includes(c.key) ? 0.35 : 1, cursor: REQUIRED.includes(c.key) ? 'not-allowed' : 'pointer' }}>✕</button>
+                <div style={title}>{t('sys.audit')}</div>
+                <label style={label} htmlFor="audit-retention">{t('sys.auditDays')}</label>
+                <input id="audit-retention" type="number" min="7" max="3650" value={form.audit_retention_days ?? ''}
+                    placeholder={auditStats ? t('sys.auditPh', { n: auditStats.env_default }) : ''}
+                    onChange={e => set('audit_retention_days', e.target.value ? Number(e.target.value) : null)}
+                    style={{ ...input, maxWidth: 240 }} />
+                <div style={hint}>{t('sys.auditHint')}</div>
+                {auditStats && (
+                    <div style={{ ...hint, marginTop: 8 }}>
+                        {auditStats.rows > 0
+                            ? t('sys.auditNow', {
+                                n: auditStats.rows.toLocaleString(locale()),
+                                date: new Date(auditStats.oldest).toLocaleDateString(locale(), { timeZone: appTimeZone(), day: 'numeric', month: 'short', year: 'numeric' }),
+                                size: formatBytes(auditStats.bytes),
+                            })
+                            : t('sys.auditEmpty')}
                     </div>
-                ))}
-                {form.ticket_categories.length < 20 && (
-                    <button onClick={() => set('ticket_categories', [...form.ticket_categories, { key: '', label: '', _id: Math.random().toString(36).slice(2) }])} style={{ ...small, marginTop: 4 }}>{t('sys.addCategory')}</button>
                 )}
-                <div style={hint}>{t('sys.categoriesHint')}</div>
             </div>
 
             <div style={card}>
-                <div style={title}>{t('sys.osOptions')}</div>
-                {osList.map((o, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                        <input value={o} maxLength={40} placeholder={t('sys.osPh')} aria-label={t('sys.osLabel', { n: i + 1 })}
-                            onChange={e => setOs(i, e.target.value)} style={{ ...input, flex: 1, minWidth: 0 }} />
-                        <button disabled={i === 0} onClick={() => moveOsUp(i)} title={t('sys.moveUp')} aria-label={t('sys.moveUp')}
-                            style={{ ...small, opacity: i === 0 ? 0.35 : 1, cursor: i === 0 ? 'default' : 'pointer' }}>↑</button>
-                        <button disabled={osList.length === 1} onClick={() => set('vps_os_options', osList.filter((_, j) => j !== i))}
-                            title={osList.length === 1 ? t('sys.osMin') : t('common.delete')}
-                            style={{ ...small, opacity: osList.length === 1 ? 0.35 : 1, cursor: osList.length === 1 ? 'not-allowed' : 'pointer' }}>✕</button>
-                    </div>
-                ))}
-                {osList.length < 20 && (
-                    <button onClick={() => set('vps_os_options', [...osList, ''])} style={{ ...small, marginTop: 4 }}>{t('sys.addOs')}</button>
-                )}
-                <div style={hint}>{t('sys.osHint')}</div>
+                <div style={title}>{t('sys.timezone')}</div>
+                <label style={label} htmlFor="sys-timezone">{t('sys.timezoneLabel')}</label>
+                <select id="sys-timezone" value={form.timezone || 'Asia/Jakarta'} onChange={e => set('timezone', e.target.value)} style={input}>
+                    <optgroup label={t('sys.tzIndonesia')}>
+                        {INDONESIA_ZONES.map(([id, name]) => <option key={id} value={id}>{name} ({id})</option>)}
+                    </optgroup>
+                    <optgroup label={t('sys.tzOthers')}>
+                        {allZones.filter(z => !INDONESIA_ZONES.some(([id]) => id === z)).map(z => <option key={z} value={z}>{z}</option>)}
+                    </optgroup>
+                </select>
+                <div style={{ marginTop: 10, fontSize: 13 }}>
+                    <span style={{ color: 'var(--text3)', fontSize: 11, marginRight: 8 }}>{t('sys.tzNow')}</span>
+                    <Clock timeZone={form.timezone || 'Asia/Jakarta'} style={{ fontSize: 13 }} />
+                </div>
+                <div style={hint}>{t('sys.timezoneHint')}</div>
             </div>
 
             <div style={card}>

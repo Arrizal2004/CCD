@@ -1,5 +1,6 @@
 // Format dan gaya bersama untuk halaman Audit & Remote (AdminPanel) dan tampilan aktivitas pengguna.
 import { locale, t } from './i18n';
+import { appTimeZone } from './sysconfig';
 
 export const ROLE_COLOR = { superadmin: '#ff6b35', sysadmin: 'var(--cyan)', student: 'var(--purple)' };
 export const SEV_COLOR = { CRITICAL: 'var(--red)', WARNING: 'var(--yellow)', INFO: 'var(--cyan)' };
@@ -8,12 +9,12 @@ export const PAGE = 50;
 export function fmtTime(iso) {
     if (!iso) return '—';
     try {
-        return new Date(iso).toLocaleString(locale(), { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        return new Date(iso).toLocaleString(locale(), { timeZone: appTimeZone(), day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     } catch { return iso; }
 }
 export function fmtEpoch(ms) {
     if (!ms) return '—';
-    try { return new Date(ms).toLocaleString(locale(), { timeZone: 'Asia/Jakarta', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+    try { return new Date(ms).toLocaleString(locale(), { timeZone: appTimeZone(), day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
     catch { return '—'; }
 }
 export function fmtDur(s) {

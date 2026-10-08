@@ -25,6 +25,7 @@ import LanguageToggle from './components/LanguageToggle';
 import ThemeToggle from './components/ThemeToggle';
 import AnnouncementBanner from './components/AnnouncementBanner';
 import ForbiddenPage from './components/ForbiddenPage';
+import Clock from './components/Clock';
 
 // Role badge colors
 const ROLE_COLOR = {
@@ -161,6 +162,8 @@ export default function App() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <Clock />
+
                     {/* About / Tentang Sistem */}
                     <button onClick={() => setShowAbout(true)} title={t('header.about')}
                         style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontFamily: 'var(--fmono)', background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer' }}>

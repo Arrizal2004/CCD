@@ -1,0 +1,30 @@
+// Pengelolaan kategori Helpdesk (di halaman Helpdesk) dan pilihan OS Infra Request (di halaman Infra
+// Requests). Keduanya hanya untuk superadmin. [Indonesia, English]
+export default {
+    'tcat.open': ['Kelola kategori', 'Manage categories'],
+    'tcat.title': ['Kategori tiket Helpdesk', 'Helpdesk ticket categories'],
+    'tcat.namePh': ['Nama kategori', 'Category name'],
+    'tcat.new': ['baru', 'new'],
+    'tcat.locked': ['Kategori ini dipakai sistem dan tidak bisa dihapus', 'The system uses this category, so it cannot be deleted'],
+    'tcat.add': ['+ Tambah kategori', '+ Add category'],
+    'tcat.hint': ['Kosongkan nama untuk memakai nama bawaan (ikut bahasa pengguna). Kategori baru dibuatkan kode dari namanya saat disimpan. Tiket lama dengan kategori yang dihapus tetap tampil dengan kodenya.', 'Leave a name empty to use the default name (follows the user\'s language). New categories get a code from their name when saved. Old tickets in a deleted category still show its code.'],
+    'tcat.rowLabel': ['Nama kategori {n}', 'Category {n} name'],
+    'tcat.saved': ['Kategori tersimpan', 'Categories saved'],
+
+    'osopt.open': ['Kelola pilihan OS', 'Manage OS choices'],
+    'osopt.title': ['Pilihan OS di Infra Request', 'OS choices in infrastructure requests'],
+    'osopt.namePh': ['mis. Rocky Linux 9', 'e.g. Rocky Linux 9'],
+    'osopt.rowLabel': ['Pilihan OS {n}', 'OS choice {n}'],
+    'osopt.up': ['Naikkan', 'Move up'],
+    'osopt.min': ['Minimal satu pilihan OS', 'At least one OS choice is required'],
+    'osopt.add': ['+ Tambah OS', '+ Add OS'],
+    'osopt.hint': ['Pilihan yang muncul saat mahasiswa mengajukan VPS, sesuai urutan di sini; yang paling atas terpilih otomatis. Logo opsional (PNG, JPG, atau WebP, maks. 256 KB) dan tampil di samping nama. Request lama tetap menampilkan OS yang dipilih waktu itu.', 'The choices students see when requesting a VPS, in this order; the top one is preselected. A logo is optional (PNG, JPG or WebP, at most 256 KB) and shows next to the name. Old requests keep showing the OS chosen at the time.'],
+    'osopt.chooseLogo': ['Pilih logo', 'Choose logo'],
+    'osopt.changeLogo': ['Ganti logo', 'Change logo'],
+    'osopt.removeLogo': ['Hapus logo', 'Remove logo'],
+    'osopt.noLogo': ['tanpa logo', 'no logo'],
+    'osopt.logoBad': ['Logo harus berupa PNG, JPG, atau WebP', 'The logo must be PNG, JPG or WebP'],
+    'osopt.logoBig': ['Logo maksimal 256 KB', 'The logo may be at most 256 KB'],
+    'osopt.logoAlt': ['Logo {name}', '{name} logo'],
+    'osopt.saved': ['Pilihan OS tersimpan', 'OS choices saved'],
+};

@@ -734,8 +734,10 @@ async def purge_old_audit_logs() -> int:
     """Hapus audit log lebih tua dari AUDIT_RETENTION_DAYS hari. Dipanggil oleh background
     job yang sama dengan cleanup_old_metrics(), retensinya sengaja terpisah (lihat komentar
     di AUDIT_RETENTION_DAYS)."""
+    from services.system_settings import audit_retention_days
+    days = await audit_retention_days()    # pengaturan Sistem; kalau kosong AUDIT_RETENTION_DAYS
     pool = await get_pool()
-    cutoff = datetime.now(timezone.utc) - timedelta(days=AUDIT_RETENTION_DAYS)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     async with pool.acquire() as conn:
         deleted = await conn.fetchval(
@@ -756,7 +758,7 @@ async def purge_old_audit_logs() -> int:
         remote = 0
 
     log.info("Audit log cleanup done", extra={"rows": deleted, "remote_rows": remote,
-                                              "retention_days": AUDIT_RETENTION_DAYS})
+                                              "retention_days": days})
     return deleted or 0
 
 
