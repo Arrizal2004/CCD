@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { setLanguage, t, useT } from '../i18n';
 import { accentVars } from '../branding';
 import { leaseInfo } from '../format';
-import { categoryLabel, osIcon } from '../sysconfig';
+import { categoryLabel } from '../sysconfig';
 import AnnouncementBanner from '../components/AnnouncementBanner';
 import LanguageToggle from '../components/LanguageToggle';
 
@@ -58,15 +58,6 @@ describe('categoryLabel', () => {
     });
 });
 
-describe('osIcon', () => {
-    it('ikon pilihan OS dari namanya', () => {
-        expect(osIcon('Windows Server 2022')).toBe('🪟');
-        expect(osIcon('openSUSE Leap 16')).toBe('🐧');
-        expect(osIcon('Rocky Linux 9')).toBe('🐧');
-        expect(osIcon('FreeBSD 14')).toBe('😈');
-        expect(osIcon('MikroTik RouterOS')).toBe('💿');
-    });
-});
 
 describe('AnnouncementBanner', () => {
     it('bisa ditutup dan tetap tertutup untuk pengumuman yang sama', () => {

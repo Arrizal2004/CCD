@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchSystemSettings, saveSystemSettings, uploadSystemLogo, deleteSystemLogo } from '../api';
 import { DEFAULT_BRANDING, loadBranding } from '../branding';
 import { tNodes, useT } from '../i18n';
-import { osIcon } from '../sysconfig';
 import BrandLogo from './BrandLogo';
 import AnnouncementBanner from './AnnouncementBanner';
 
@@ -290,7 +289,6 @@ export default function SystemSettingsPage() {
                 <div style={title}>{t('sys.osOptions')}</div>
                 {osList.map((o, i) => (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                        <span style={{ width: 20, textAlign: 'center', flexShrink: 0 }}>{osIcon(o)}</span>
                         <input value={o} maxLength={40} placeholder={t('sys.osPh')} aria-label={t('sys.osLabel', { n: i + 1 })}
                             onChange={e => setOs(i, e.target.value)} style={{ ...input, flex: 1, minWidth: 0 }} />
                         <button disabled={i === 0} onClick={() => moveOsUp(i)} title={t('sys.moveUp')} aria-label={t('sys.moveUp')}

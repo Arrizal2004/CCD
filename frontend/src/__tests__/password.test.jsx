@@ -107,7 +107,8 @@ describe('Users: reset password dan permintaan lupa password', () => {
         // Satu tombol di panel permintaan + satu di baris budi; tidak ada untuk akun sysadmin lain.
         expect(screen.getAllByRole('button', { name: /Reset password/ })).toHaveLength(2);
 
-        fireEvent.click(screen.getByRole('button', { name: '🔑 Reset password' }));
+        // Tombol pertama ada di panel permintaan, yang kedua di baris budi.
+        fireEvent.click(screen.getAllByRole('button', { name: 'Reset password' })[1]);
         fireEvent.click(screen.getAllByRole('button', { name: 'Reset password' }).at(-1));
 
         const dialog = await screen.findByRole('dialog', { name: 'Password sementara' });

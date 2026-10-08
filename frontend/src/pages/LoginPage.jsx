@@ -7,6 +7,7 @@ import BrandLogo from '../components/BrandLogo';
 import LanguageToggle from '../components/LanguageToggle';
 import ThemeToggle from '../components/ThemeToggle';
 import AnnouncementBanner from '../components/AnnouncementBanner';
+import Icon from '../components/Icons';
 
 const BASE = import.meta.env.VITE_API_URL || '';
 
@@ -115,7 +116,7 @@ function LoginForm({ onLogin, notice, onGoRegister, onGoForgot }) {
 
             {notice && (
                 <div style={{ padding: '8px 12px', background: 'var(--yellow-glow)', border: '1px solid var(--yellow)44', borderRadius: 6, color: 'var(--yellow)', fontSize: 12, marginBottom: 16, fontFamily: 'var(--fmono)' }}>
-                    ⏱ {notice}
+                    {notice}
                 </div>
             )}
 
@@ -130,9 +131,9 @@ function LoginForm({ onLogin, notice, onGoRegister, onGoForgot }) {
                             style={{ width: '100%', background: 'var(--bg-hover)', border: `1px solid ${error ? 'var(--red)' : 'var(--border-light)'}`, borderRadius: 8, padding: '10px 36px 10px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'var(--fmono)', outline: 'none', boxSizing: 'border-box' }}
                             onFocus={e => e.target.style.borderColor = 'var(--cyan)'}
                             onBlur={e => e.target.style.borderColor = error ? 'var(--red)' : 'var(--border-light)'} />
-                        <button type="button" onClick={() => setShow(p => !p)}
+                        <button type="button" onClick={() => setShow(p => !p)} aria-label={t('profile.showPassword')} title={t('profile.showPassword')}
                             style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 14 }}>
-                            {showPass ? '🙈' : '👁'}
+                            <Icon name={showPass ? 'eyeOff' : 'eye'} />
                         </button>
                     </div>
                 </div>
@@ -192,7 +193,6 @@ function ForgotForm({ initialUsername, onGoLogin }) {
     if (done) {
         return (
             <div style={{ ...CARD, textAlign: 'center' }}>
-                <div style={{ fontSize: 40, marginBottom: 14 }}>📨</div>
                 <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--green)' }}>{t('forgot.doneTitle')}</div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 24, lineHeight: 1.7, padding: '10px 14px', background: 'var(--bg-hover)', borderRadius: 8 }}>
                     {t('forgot.doneHint')}
@@ -256,9 +256,9 @@ export function ForcePasswordChange({ user, knownPassword, onDone, onLogout }) {
     return (
         <PageShell>
             <div style={CARD}>
-                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>🔑 {t('mustChange.title')}</div>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{t('mustChange.title')}</div>
                 <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 20, lineHeight: 1.6 }}>{t('mustChange.subtitle')}</div>
-                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 16, fontFamily: 'var(--fmono)' }}>👤 {user?.username}</div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 16, fontFamily: 'var(--fmono)' }}>{user?.username}</div>
                 <form onSubmit={submit}>
                     {/* Kolom username tersembunyi membantu password manager menyimpan password baru untuk akun yang benar. */}
                     <input type="text" name="username" autoComplete="username" value={user?.username || ''} readOnly hidden />
@@ -324,7 +324,6 @@ function RegisterForm({ onGoLogin }) {
     if (success) {
         return (
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 16, padding: 32, boxShadow: '0 16px 48px rgba(0,0,0,0.3)', textAlign: 'center' }}>
-                <div style={{ fontSize: 40, marginBottom: 14 }}>✅</div>
                 <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--green)' }}>{t('register.successTitle')}</div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8, lineHeight: 1.7, fontFamily: 'var(--font)' }}>
                     {success}

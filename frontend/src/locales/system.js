@@ -39,7 +39,7 @@ export default {
     'sys.themeDark': ['Gelap', 'Dark'],
     'sys.themeLight': ['Terang', 'Light'],
     'sys.themeSystem': ['Ikuti perangkat pengguna', 'Follow the user\'s device'],
-    'sys.langThemeHint': ['Berlaku juga di halaman login. Setiap pengguna tetap bisa mengganti bahasa (ID / EN) dan tema (☀️ / 🌙) sendiri; pilihannya disimpan di browser masing-masing.', 'Also applies to the sign-in page. Every user can still switch the language (ID / EN) and theme (☀️ / 🌙); their choice is kept in their own browser.'],
+    'sys.langThemeHint': ['Berlaku juga di halaman login. Setiap pengguna tetap bisa mengganti bahasa (ID / EN) dan tema (/ ) sendiri; pilihannya disimpan di browser masing-masing.', 'Also applies to the sign-in page. Every user can still switch the language (ID / EN) and theme (/ ); their choice is kept in their own browser.'],
     'sys.preview': ['Pratinjau', 'Preview'],
     'sys.previewPhone': ['HP: {name}', 'Phone: {name}'],
     'sys.sampleButton': ['Contoh tombol', 'Sample button'],

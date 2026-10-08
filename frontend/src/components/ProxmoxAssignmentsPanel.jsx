@@ -171,7 +171,7 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
                                             </div>
                                             <button onClick={() => doQuickAddAndAssign(s)} disabled={quickSaving}
                                                 style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'var(--cyan)', color: '#000', border: 'none', opacity: quickSaving ? 0.6 : 1 }}>
-                                                {quickSaving ? '⏳' : t('asg.addAssign')}
+                                                {quickSaving ? '…' : t('asg.addAssign')}
                                             </button>
                                         </div>
                                         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>

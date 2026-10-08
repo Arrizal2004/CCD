@@ -8,11 +8,12 @@ import {
     fetchAllProxmoxVms,
 } from '../api';
 import useIsMobile from '../useIsMobile';
-import { osIcon, useSysConfig } from '../sysconfig';
+import { useSysConfig } from '../sysconfig';
 import { formatCcdId } from '../format';
 import { locale, t as translate, useT } from '../i18n';
 import PaneTabs from './PaneTabs';
 import CreateVmModal from './CreateVmModal';
+import Icon from './Icons';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -152,7 +153,7 @@ function CreateModal({ onClose, onCreated }) {
                                                 background: os === name ? 'rgba(0,229,255,0.1)' : 'var(--bg-hover)',
                                                 color: os === name ? 'var(--cyan)' : 'var(--text3)',
                                             }}>
-                                            {osIcon(name)} {name}
+                                            {name}
                                         </button>
                                     ))}
                                 </div>
@@ -420,8 +421,8 @@ function DetailModal({ req, currentUser, onClose, onUpdated }) {
                                     <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>{t('infra.password')}</div>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                                         <span style={{ fontFamily: 'var(--fmono)', fontSize: 12, color: 'var(--text)' }}>{showPass ? req.vpn_password : '••••••••'}</span>
-                                        <button onClick={() => setShowPass(v => !v)} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 12, padding: 0 }}>
-                                            {showPass ? '🙈' : '👁'}
+                                        <button onClick={() => setShowPass(v => !v)} aria-label={t('profile.showPassword')} title={t('profile.showPassword')} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 12, padding: 0 }}>
+                                            <Icon name={showPass ? 'eyeOff' : 'eye'} />
                                         </button>
                                     </div>
                                 </>}
@@ -487,9 +488,9 @@ function DetailModal({ req, currentUser, onClose, onUpdated }) {
                                         <div style={{ position: 'relative' }}>
                                             <input type={showPass ? 'text' : 'password'} value={vpnPass} onChange={e => setVpnPass(e.target.value)} placeholder={t('infra.vpnPassPh')}
                                                 style={{ ...inpSt, paddingRight: 28 }} />
-                                            <button type="button" onClick={() => setShowPass(v => !v)}
+                                            <button type="button" onClick={() => setShowPass(v => !v)} aria-label={t('profile.showPassword')} title={t('profile.showPassword')}
                                                 style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 11 }}>
-                                                {showPass ? '🙈' : '👁'}
+                                                <Icon name={showPass ? 'eyeOff' : 'eye'} />
                                             </button>
                                         </div>
                                         <label style={lblSt}>{t('infra.vpnConfig')}</label>
@@ -673,7 +674,6 @@ export default function InfraRequestsPage({ currentUser }) {
             {/* Upgrade banner */}
             {justVerified && (
                 <div style={{ marginBottom: 18, padding: '14px 18px', background: 'rgba(0,230,118,0.1)', border: '1px solid var(--green)55', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <span style={{ fontSize: 24 }}>🎉</span>
                     <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 700, color: 'var(--green)', fontSize: 13 }}>{t('infra.verifiedTitle')}</div>
                         <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{t('infra.verifiedBody')}</div>
@@ -688,7 +688,6 @@ export default function InfraRequestsPage({ currentUser }) {
             {/* Restricted banner */}
             {isRestricted && !justVerified && (
                 <div style={{ marginBottom: 18, padding: '12px 16px', background: 'rgba(255,214,0,0.07)', border: '1px solid var(--yellow)44', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 12, fontSize: 12 }}>
-                    <span style={{ fontSize: 18 }}>🔒</span>
                     <div style={{ color: 'var(--text2)', lineHeight: 1.5 }}>
                         <span style={{ color: 'var(--yellow)', fontWeight: 600 }}>{t('infra.restrictedTitle')}</span>
                         {t('infra.restrictedBody')}

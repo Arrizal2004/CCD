@@ -164,7 +164,7 @@ export default function App() {
                     {/* About / Tentang Sistem */}
                     <button onClick={() => setShowAbout(true)} title={t('header.about')}
                         style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontFamily: 'var(--fmono)', background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer' }}>
-                        ℹ️<span className="ccd-hide-mobile"> {t('header.about')}</span>
+                        <span className="ccd-hide-mobile"> {t('header.about')}</span>
                     </button>
 
                     <LanguageToggle />

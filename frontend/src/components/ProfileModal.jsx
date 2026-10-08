@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { changePassword, fetchSshConfig } from '../api';
 import SshKeysSection from './SshKeysSection';
 import { useT } from '../i18n';
+import Icon from './Icons';
 
 const ROLE_COLOR = {
     superadmin: 'var(--red)',
@@ -47,7 +48,7 @@ function Field({ label, type = 'text', value, onChange, placeholder }) {
                         tabIndex={-1}
                         aria-label={t('profile.showPassword')}
                     >
-                        {show ? '🙈' : '👁'}
+                        <Icon name={show ? 'eyeOff' : 'eye'} />
                     </button>
                 )}
             </div>

@@ -23,14 +23,6 @@ export function useSysConfig() {
     return useSyncExternalStore(fn => { listeners.add(fn); return () => listeners.delete(fn); }, () => state);
 }
 
-// Ikon pilihan OS dari namanya; nama yang tidak dikenali memakai ikon cakram.
-export function osIcon(name = '') {
-    if (/windows/i.test(name)) return '🪟';
-    if (/bsd/i.test(name)) return '😈';
-    if (/linux|ubuntu|debian|suse|fedora|rocky|alma|cent ?os|red ?hat|rhel|kali|arch|mint|manjaro|alpine|oracle/i.test(name)) return '🐧';
-    return '💿';
-}
-
 // Label kategori: label dari Pengaturan Sistem, atau label bawaan yang diterjemahkan.
 export function categoryLabel(key, categories = state.ticket_categories) {
     const c = categories.find(x => x.key === key);

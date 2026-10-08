@@ -208,7 +208,7 @@ export function KillDialog({ title, subject, options, confirmLabel, onConfirm, o
                         <button onClick={onClose} disabled={busy} style={btn}>{t('common.cancel')}</button>
                         <button onClick={submit} disabled={busy}
                             style={{ ...btn, background: 'var(--red)', color: '#fff', borderColor: 'var(--red)', opacity: busy ? 0.6 : 1 }}>
-                            {busy ? '⏳' : confirmLabel}
+                            {busy ? '…' : confirmLabel}
                         </button>
                     </div>
                 </div>

@@ -23,7 +23,6 @@ export default class ErrorBoundary extends Component {
                     justifyContent: 'center', height: '100vh',
                     background: '#0b0f1a', color: '#ff1744', fontFamily: 'monospace', gap: 16
                 }}>
-                    <div style={{ fontSize: 32 }}>⚠</div>
                     <div style={{ fontSize: 14, color: '#e8f0fe' }}>{t('app.renderError')}</div>
                     <div style={{ fontSize: 11, color: '#4a6a8a', maxWidth: 500, textAlign: 'center' }}>
                         {this.state.error?.message}

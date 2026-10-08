@@ -113,7 +113,7 @@ Ganti password setelah login pertama lewat menu Profil (pojok kanan atas). Ini w
 
 Lalu buka tab **Sistem** (khusus superadmin) untuk menyesuaikan dashboard dengan sekolah atau kampus Anda:
 - **Identitas dan tampilan:** nama sistem, nama singkat (header di HP), nama institusi, tagline, logo (PNG/JPG/WebP, maks 512 KB), dan warna aksen. Dipakai di judul dan ikon tab browser, halaman login, header, footer, dan jendela Tentang. Warna yang terlalu gelap ditolak supaya teks di tombol tetap terbaca.
-- **Bahasa dan tema bawaan:** bahasa Indonesia atau Inggris, tema gelap, terang, atau ikuti perangkat pengguna. Setiap pengguna, termasuk yang belum punya akun di halaman login, bisa mengganti lewat tombol **ID / EN** dan **☀️ / 🌙**; pilihannya disimpan di browser masing-masing. Seluruh halaman dan pesan galat dari server mengikuti bahasa pilihan pengguna. Catatan yang sudah tersimpan, seperti Activity Log dan pesan sistem di tiket, tetap dalam bahasa saat dicatat.
+- **Bahasa dan tema bawaan:** bahasa Indonesia atau Inggris, tema gelap, terang, atau ikuti perangkat pengguna. Setiap pengguna, termasuk yang belum punya akun di halaman login, bisa mengganti lewat tombol **ID / EN** dan tombol ikon matahari atau bulan; pilihannya disimpan di browser masing-masing. Seluruh halaman dan pesan galat dari server mengikuti bahasa pilihan pengguna. Catatan yang sudah tersimpan, seperti Activity Log dan pesan sistem di tiket, tetap dalam bahasa saat dicatat.
 - **Pengumuman:** teks dengan jenis Info, Peringatan, atau Penting, bisa diberi waktu tampil, dan bisa ditampilkan juga di halaman login. Pengguna bisa menutup pengumuman Info dan Peringatan.
 - **Nilai bawaan:** masa sewa untuk VM baru (terisi otomatis di form Create VM) dan masa berlaku untuk akun baru (pendaftaran mandiri dan baris impor CSV tanpa `expires_at`).
 - **Kategori tiket Helpdesk:** ganti nama, tambah, atau hapus. *Perpanjang Sewa* dan *Lainnya* selalu ada karena dipakai sistem.
@@ -315,7 +315,7 @@ Di tab **Users** (superadmin):
 Menonaktifkan akun, mengubah masa berlakunya, atau menghapusnya langsung berlaku: dashboard memeriksa status akun di setiap permintaan, bukan hanya saat login.
 
 **Lupa password akun dashboard.** Dashboard tidak mengirim email, jadi password direset oleh admin:
-- Di tab **Users**, tombol **🔑 Reset** (superadmin, untuk semua akun selain akunnya sendiri) atau **🔑 Reset password** (sysadmin, hanya akun mahasiswa) membuat password sementara acak. Password itu hanya ditampilkan sekali. Berikan langsung ke pemilik akun.
+- Di tab **Users**, tombol **Reset** (superadmin, untuk semua akun selain akunnya sendiri) atau **Reset password** (sysadmin, hanya akun mahasiswa) membuat password sementara acak. Password itu hanya ditampilkan sekali. Berikan langsung ke pemilik akun.
 - Begitu direset, password lama dan semua sesi login akun itu berakhir, sesi remote yang sedang berjalan diputus, dan kuncian karena salah password dihapus. Saat login dengan password sementara, pengguna langsung diminta membuat password baru. Sebelum menggantinya, ia belum bisa memakai fitur lain, termasuk Connect. Akunnya ditandai *Wajib ganti password* di daftar Users.
 - Halaman login punya tautan **Lupa password?**. Pengguna mengisi username dan pesan opsional (mis. kelas atau cara menghubunginya). Permintaannya muncul di bagian atas tab **Users**, lengkap dengan tombol **Reset password** dan **Abaikan**, dan jumlahnya tampil sebagai angka merah di tab itu. Sysadmin hanya melihat permintaan dari akun mahasiswa.
 - Jawaban di halaman login selalu sama, terdaftar atau tidak, jadi form ini tidak bisa dipakai untuk menebak username. Satu IP dibatasi 10 permintaan per jam. Siapa pun bisa mengirim permintaan untuk username apa pun, jadi pastikan yang meminta memang pemilik akunnya sebelum memberikan password sementara.
@@ -416,12 +416,12 @@ Tab **Open Web**: ketik alamat web lalu klik **Buka**, halaman tampil di dalam d
 - Web yang memakai path absolut (`/static/...`) atau sangat bergantung pada cookie bisa tampil tidak lengkap. Web yang melarang di-embed (`X-Frame-Options`) tampil kosong untuk alamat publik.
 
 ### Sebagai admin — memantau sesi
-- Tab **Audit & Remote → Activity Log**: riwayat semua aksi penting, termasuk login, VM, resize, Open Web, SSH, perubahan akun (buat, ubah peran/status/email/masa berlaku, hapus), perubahan grup dan anggotanya, serta tambah/ubah/hapus instance Proxmox. Bisa disaring per kata, per akun, per jenis aksi, per tingkat, dan per tanggal. **⬇ Ekspor CSV** mengunduh hasil saringan itu (maks. 50.000 baris, waktu dalam WIB). Daftar dimuat ulang otomatis tiap 15 detik hanya di halaman 1, supaya baris tidak bergeser saat membaca halaman berikutnya.
+- Tab **Audit & Remote → Activity Log**: riwayat semua aksi penting, termasuk login, VM, resize, Open Web, SSH, perubahan akun (buat, ubah peran/status/email/masa berlaku, hapus), perubahan grup dan anggotanya, serta tambah/ubah/hapus instance Proxmox. Bisa disaring per kata, per akun, per jenis aksi, per tingkat, dan per tanggal. **Ekspor CSV** mengunduh hasil saringan itu (maks. 50.000 baris, waktu dalam WIB). Daftar dimuat ulang otomatis tiap 15 detik hanya di halaman 1, supaya baris tidak bergeser saat membaca halaman berikutnya.
 - Tab **Audit & Remote → Login Gagal**: rekap login gagal 1, 7, atau 30 hari terakhir, per akun dan per IP. Akun yang sedang terkunci (5 kali gagal dalam 5 menit) ditandai. Satu IP yang mencoba banyak akun berbeda patut dicurigai.
 - Tab **Audit & Remote → Sesi Remote**: siapa yang sedang connect ke VM mana, protokolnya, dan dari IP mana. Riwayatnya dibaca langsung dari database Guacamole, jadi tidak terbatas jumlah, bisa dicari per user atau VM, dan bisa diekspor. Sesi yang dibuka sebelum versi ini tidak menampilkan IP, karena yang tercatat waktu itu adalah IP container backend.
 - Tab **Audit & Remote → Sesi Web**: link Open Web yang aktif dan riwayatnya (user, IP target, IP pengakses, jumlah request). IP pengakses kuning berarti link dipakai dari lebih dari satu IP. *Cabut Link* mematikan link itu seketika. Jumlah request hanya perkiraan.
 - Tab **Audit & Remote → Sesi SSH** (muncul kalau bastion aktif, Bagian 8): siapa yang SSH lewat bastion, dari IP mana, ke VM mana, durasi, dan jumlah data.
-- Klik nama pengguna di tab mana pun (atau tombol **📋 Aktivitas** di halaman Users) untuk melihat semua catatannya di satu jendela: Activity Log, sesi Remote, link Open Web, dan sesi SSH.
+- Klik nama pengguna di tab mana pun (atau tombol **Aktivitas** di halaman Users) untuk melihat semua catatannya di satu jendela: Activity Log, sesi Remote, link Open Web, dan sesi SSH.
 
 **Memutus sesi.** *Putuskan Sesi* (Remote, SSH) dan *Cabut Link* (Web) menanyakan apa yang dilakukan sesudahnya:
 - **Putuskan saja**: pengguna bisa langsung menyambung lagi.
@@ -591,7 +591,7 @@ Bastion meneruskan log `sshd` ke dashboard, jadi setiap koneksi tercatat di **Au
 
 Isi sesi tidak direkam. Bastion memang tidak bisa melihatnya, karena koneksi terenkripsi langsung antara laptop dan VM. Percobaan dengan key yang tidak terdaftar di dashboard (biasanya pemindaian dari internet) hanya ada di `sudo docker compose logs bastion`.
 
-Menghapus key atau menonaktifkan akun dari halaman Users hanya menolak login berikutnya. Untuk memutus sesi yang sedang berjalan, pakai **Audit & Remote → Sesi SSH → ⛔ Putuskan Sesi** (bisa sekaligus menonaktifkan akunnya). Perintahnya dijalankan skrip `ccd-kill` di container bastion; kalau bastion belum diperbarui ke versi ini, dashboard menampilkan pesan agar container bastion dibangun ulang (`sudo docker compose --profile ssh up -d --build bastion`). Pemutusan tercatat sebagai `SSH_KILL`. `sudo docker compose restart bastion` tetap bisa dipakai untuk memutus semua sesi SSH sekaligus.
+Menghapus key atau menonaktifkan akun dari halaman Users hanya menolak login berikutnya. Untuk memutus sesi yang sedang berjalan, pakai **Audit & Remote → Sesi SSH → Putuskan Sesi** (bisa sekaligus menonaktifkan akunnya). Perintahnya dijalankan skrip `ccd-kill` di container bastion; kalau bastion belum diperbarui ke versi ini, dashboard menampilkan pesan agar container bastion dibangun ulang (`sudo docker compose --profile ssh up -d --build bastion`). Pemutusan tercatat sebagai `SSH_KILL`. `sudo docker compose restart bastion` tetap bisa dipakai untuk memutus semua sesi SSH sekaligus.
 
 ---
 

@@ -190,7 +190,6 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                             <OsCard
                                 selected={osType === 'linux'}
                                 onClick={() => setOsType('linux')}
-                                icon="🐧"
                                 title="Linux"
                                 subtitle={t('cred.linuxSub')}
                                 color="#4ade80"
@@ -199,7 +198,6 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                             <OsCard
                                 selected={osType === 'windows'}
                                 onClick={() => setOsType('windows')}
-                                icon="⊞"
                                 title="Windows"
                                 subtitle={t('cred.windowsSub')}
                                 color="#8be9fd"
@@ -241,12 +239,12 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                             <ProtoCard
                                                 selected={form.guac_protocol === 'ssh'}
                                                 onClick={() => pickProto('ssh')}
-                                                icon="🖥" title="SSH" subtitle={t('cred.sshSub')} color="#4ade80"
+                                                title="SSH" subtitle={t('cred.sshSub')} color="#4ade80"
                                             />
                                             <ProtoCard
                                                 selected={form.guac_protocol === 'rdp'}
                                                 onClick={() => pickProto('rdp')}
-                                                icon="🪟" title="RDP" subtitle={t('cred.rdpSub')} color="#8be9fd"
+                                                title="RDP" subtitle={t('cred.rdpSub')} color="#8be9fd"
                                             />
                                         </div>
                                     </div>
@@ -296,7 +294,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                         <div>
                                             <label style={labelStyle}>{t('cred.authMethod')}</label>
                                             <div style={{ display: 'flex', gap: 8 }}>
-                                                {[['password', '🔑 Password'], ['pkey', '🗝️ Private Key']].map(([v, l]) => (
+                                                {[['password', 'Password'], ['pkey', 'Private Key']].map(([v, l]) => (
                                                     <button key={v} onClick={() => setAuthMode(v)} style={tabBtn(authMode === v)}>
                                                         {l}
                                                     </button>
@@ -400,7 +398,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
     );
 }
 
-function ProtoCard({ selected, onClick, icon, title, subtitle, color }) {
+function ProtoCard({ selected, onClick, title, subtitle, color }) {
     return (
         <div onClick={onClick} style={{
             padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
@@ -408,7 +406,6 @@ function ProtoCard({ selected, onClick, icon, title, subtitle, color }) {
             background: selected ? `${color}12` : 'var(--bg-hover)',
             transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 10,
         }}>
-            <span style={{ fontSize: 18 }}>{icon}</span>
             <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: selected ? color : 'var(--text)' }}>{title}</div>
                 <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 1 }}>{subtitle}</div>
@@ -417,7 +414,7 @@ function ProtoCard({ selected, onClick, icon, title, subtitle, color }) {
     );
 }
 
-function OsCard({ selected, onClick, icon, title, subtitle, color, proto }) {
+function OsCard({ selected, onClick, title, subtitle, color, proto }) {
     return (
         <div
             onClick={onClick}
@@ -438,7 +435,6 @@ function OsCard({ selected, onClick, icon, title, subtitle, color, proto }) {
                     fontSize: 11, fontWeight: 700,
                 }}>✓</div>
             )}
-            <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
             <div style={{ fontSize: 14, fontWeight: 600, color: selected ? color : 'var(--text)', marginBottom: 2 }}>
                 {title}
             </div>

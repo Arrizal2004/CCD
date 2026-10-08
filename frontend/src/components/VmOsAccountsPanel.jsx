@@ -179,7 +179,7 @@ export default function VmOsAccountsPanel({ hostName, vmid }) {
                     style={{ ...input, flex: '1 1 200px' }} />
                 <button onClick={add} disabled={busy || !form.os_username.trim()}
                     style={{ ...small, background: 'var(--cyan)', color: '#000', border: 'none', fontWeight: 600, opacity: busy || !form.os_username.trim() ? 0.6 : 1 }}>
-                    {busy ? '⏳' : t('common.add')}
+                    {busy ? '…' : t('common.add')}
                 </button>
             </div>
             <label style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>

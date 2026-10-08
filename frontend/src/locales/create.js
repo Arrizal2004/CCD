@@ -64,7 +64,7 @@ export default {
     'bulk.colStatus': ['Status', 'Status'],
     'bulk.colVmName': ['Nama VM', 'VM name'],
     'bulk.colOsUser': ['Username OS', 'OS username'],
-    'bulk.downloadCsv': ['⬇ Unduh kredensial (CSV)', '⬇ Download credentials (CSV)'],
+    'bulk.downloadCsv': ['Unduh kredensial (CSV)', 'Download credentials (CSV)'],
     'bulk.retrying': ['Mengulang…', 'Retrying…'],
     'bulk.resume': ['Lanjutkan', 'Resume'],
     'bulk.retryFailed': ['Ulangi {n} yang gagal', 'Retry {n} failed'],

@@ -39,10 +39,12 @@ describe('theme', () => {
         const { default: ThemeToggle } = await import('../components/ThemeToggle');
         render(<ThemeToggle />);
         const btn = screen.getByRole('button', { name: 'Ganti tema' });
-        expect(btn.textContent).toBe('☀️');
+        const darkIcon = btn.innerHTML;
+        expect(btn.querySelector('svg')).not.toBeNull();
+        expect(btn.textContent).toBe('');          // ikon SVG, bukan emoji
         fireEvent.click(btn);
         expect(th.currentTheme()).toBe('light');
         expect(attr()).toBe('light');
-        expect(btn.textContent).toBe('🌙');
+        expect(btn.innerHTML).not.toBe(darkIcon);  // ikon berganti mengikuti tema
     });
 });

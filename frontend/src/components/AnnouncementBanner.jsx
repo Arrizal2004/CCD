@@ -4,7 +4,7 @@ import { useT } from '../i18n';
 // Pengumuman dari Pengaturan Sistem. Pengguna bisa menutupnya; pengumuman baru (teks atau tanggal
 // mulai berbeda) muncul lagi. Status "ditutup" hanya disimpan di browser ini.
 const COLORS = { info: 'var(--cyan)', warning: 'var(--yellow)', critical: 'var(--red)' };
-const ICONS = { info: 'ℹ️', warning: '⚠️', critical: '⛔' };
+const ICONS = { info: 'i', warning: '!', critical: '!' };
 const KEY = 'ccd_dismissed_announcement';
 
 function dismissedId() {
@@ -22,7 +22,7 @@ export default function AnnouncementBanner({ announcement, style }) {
     };
     return (
         <div role="status" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', borderRadius: 8, background: 'var(--bg-card2)', border: `1px solid ${color}`, borderLeft: `4px solid ${color}`, ...style }}>
-            <span aria-hidden="true">{ICONS[announcement.level] || ICONS.info}</span>
+            <span aria-hidden="true" style={{ flexShrink: 0, width: 18, height: 18, borderRadius: '50%', border: `1.5px solid ${color}`, color, fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 }}>{ICONS[announcement.level] || ICONS.info}</span>
             <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: 'var(--text)', lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{announcement.text}</div>
             {announcement.level !== 'critical' && (
                 <button onClick={dismiss} title={t('announcement.dismiss')} aria-label={t('announcement.dismiss')}

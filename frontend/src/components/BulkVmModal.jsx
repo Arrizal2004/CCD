@@ -20,7 +20,7 @@ const primary = { ...small, background: 'var(--cyan)', color: '#000', border: 'n
 const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 };
 const STATUS = {
     pending:  { icon: '…', color: 'var(--text3)', text: 'bulk.stPending' },
-    creating: { icon: '⚙', color: 'var(--cyan)', text: 'bulk.stCreating' },
+    creating: { icon: '…', color: 'var(--cyan)', text: 'bulk.stCreating' },
     done:     { icon: '✓', color: 'var(--green)', text: 'bulk.stDone' },
     failed:   { icon: '✗', color: 'var(--red)', text: 'bulk.stFailed' },
 };

@@ -5,6 +5,7 @@ import { leaseInfo } from '../format';
 import { locale, tNodes, useT } from '../i18n';
 import { parseCsv, CSV_TEMPLATE, credentialsCsv } from '../csv';
 import UserActivityModal from '../components/UserActivityModal';
+import Icon from '../components/Icons';
 
 // Tanggal (YYYY-MM-DD) -> akhir hari itu di zona waktu browser, dan sebaliknya.
 const endOfDay = (d) => (d ? new Date(`${d}T23:59:59`).toISOString() : null);
@@ -721,7 +722,7 @@ export default function UsersPage({ currentUser }) {
                                         <td style={{ padding: '10px 14px' }}>
                                             <button onClick={() => setActivityOf(u.username)} title={t('uact.title', { user: u.username })}
                                                 style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer', marginBottom: 5, whiteSpace: 'nowrap' }}>
-                                                📋 {t('uact.button')}
+                                                {t('uact.button')}
                                             </button>
                                             {canReset(u) && !isSuperAdmin && (
                                                 <button onClick={() => setConfirmDlg({ type: 'reset', user: u })} style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--cyan)66', color: 'var(--cyan)', cursor: 'pointer', whiteSpace: 'nowrap' }}>{t('users.resetBtn')}</button>
@@ -739,7 +740,7 @@ export default function UsersPage({ currentUser }) {
                                                         {u.is_active ? t('users.bulkDeactivate') : t('users.bulkActivate')}
                                                     </button>
 
-                                                    <button onClick={() => setConfirmDlg({ type: 'delete', user: u })} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--red)44', color: 'var(--red)', cursor: 'pointer' }} title={t('common.delete')} aria-label={t('common.delete')}>🗑</button>
+                                                    <button onClick={() => setConfirmDlg({ type: 'delete', user: u })} style={{ padding: '3px 8px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--red)44', color: 'var(--red)', cursor: 'pointer' }} title={t('common.delete')} aria-label={t('common.delete')}><Icon name="trash" size={13} /></button>
                                                 </div>
                                             )}
                                         </td>

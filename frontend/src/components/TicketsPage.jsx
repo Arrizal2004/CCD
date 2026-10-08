@@ -5,6 +5,7 @@ import { currentLang, locale, useT } from '../i18n';
 import { categoryLabel, useSysConfig } from '../sysconfig';
 import useIsMobile from '../useIsMobile';
 import PaneTabs from './PaneTabs';
+import Icon from './Icons';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const WS_BASE  = API_BASE
@@ -39,7 +40,7 @@ function AuthImage({ path, alt, style, onClickOpen }) {
     if (!blobSrc) return (
         <div style={{ ...style, display: 'flex', alignItems: 'center', justifyContent: 'center',
             background: '#11111180', borderRadius: 6, color: 'var(--text3)', fontSize: 11 }}>
-            ⏳
+            
         </div>
     );
     return <img src={blobSrc} alt={alt} style={{ ...style, cursor: 'pointer' }} onClick={onClickOpen} />;
@@ -564,7 +565,7 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                                                         <button onClick={() => downloadAuthFile(m.attachment_url, m.attachment_name)}
                                                             style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                                                                 color: 'var(--cyan)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                                                            <span>📎</span>
+                                                            <Icon name="paperclip" size={13} />
                                                             <span style={{ textDecoration: 'underline' }}>{m.attachment_name || tr('ticket.attachmentFallback')}</span>
                                                         </button>
                                                     )}
@@ -586,7 +587,7 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                                 {/* Pending attachment preview strip */}
                                 {pendingFile && (
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, padding: '4px 8px', background: 'var(--bg-hover)', borderRadius: 6, fontSize: 11, color: 'var(--text2)' }}>
-                                        <span>📎</span>
+                                        <Icon name="paperclip" size={13} />
                                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>{pendingFile.name}</span>
                                         <span style={{ color: 'var(--text3)', flexShrink: 0 }}>({(pendingFile.size / 1024).toFixed(1)} KB)</span>
                                         <button onClick={clearFile} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 14, lineHeight: 1, flexShrink: 0 }}>✕</button>
@@ -600,7 +601,7 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                                     <button type="button" onClick={() => fileInputRef.current?.click()}
                                         title={tr('ticket.attach')} aria-label={tr('ticket.attach')}
                                         style={{ width: 34, height: 34, borderRadius: 6, flexShrink: 0, background: pendingFile ? 'var(--cyan)22' : 'var(--bg-hover)', border: `1px solid ${pendingFile ? 'var(--cyan)55' : 'var(--border)'}`, color: pendingFile ? 'var(--cyan)' : 'var(--text2)', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                        📎
+                                        
                                     </button>
                                     <input value={reply} onChange={e => setReply(e.target.value)}
                                         onKeyDown={e => e.key === 'Enter' && !e.shiftKey && send()}

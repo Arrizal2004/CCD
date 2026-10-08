@@ -40,7 +40,7 @@ describe('Activity Log', () => {
     it('pencarian dikirim setelah berhenti mengetik, filter aksi dan akun ikut terkirim', async () => {
         render(<AdminPanel currentUser={SYSADMIN} />);
         await screen.findByRole('option', { name: 'USER_CREATE' });
-        const box = screen.getByLabelText('🔍 Cari user / aksi / detail / server');
+        const box = screen.getByLabelText('Cari user / aksi / detail / server');
         for (const v of ['a', 'ad', 'adm']) fireEvent.change(box, { target: { value: v } });
         await waitFor(() => expect(api.fetchAuditLogs).toHaveBeenCalledWith(expect.objectContaining({ search: 'adm' })));
         expect(api.fetchAuditLogs).not.toHaveBeenCalledWith(expect.objectContaining({ search: 'a' }));
@@ -50,7 +50,7 @@ describe('Activity Log', () => {
         await waitFor(() => expect(api.fetchAuditLogs).toHaveBeenLastCalledWith(
             expect.objectContaining({ search: 'adm', action: 'USER_CREATE', username: 'budi', page: 1 })));
 
-        fireEvent.click(screen.getByRole('button', { name: '⬇ Ekspor CSV' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Ekspor CSV' }));
         await waitFor(() => expect(api.downloadAdminCsv).toHaveBeenCalledWith('audit-logs/export',
             { search: 'adm', action: 'USER_CREATE', username: 'budi' }));
     });
@@ -73,7 +73,7 @@ describe('Activity Log', () => {
         fireEvent.click(await within(dialog).findByRole('button', { name: 'Remote (2)' }));
         expect(await within(dialog).findByText('100.64.1.2')).toBeTruthy();
         expect(within(dialog).getByText('RDP')).toBeTruthy();
-        fireEvent.click(within(dialog).getByRole('button', { name: '⬇ Ekspor CSV' }));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Ekspor CSV' }));
         await waitFor(() => expect(api.downloadAdminCsv).toHaveBeenCalledWith('remote/history/export', { username: 'budi' }));
         fireEvent.keyDown(window, { key: 'Escape' });
         await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -89,7 +89,7 @@ describe('Login gagal', () => {
             by_ip: [{ ip: '203.0.113.9', attempts: 14, last_at: '2026-10-07T01:00:00Z', accounts: 2, usernames: ['admin', 'budi'] }],
         });
         render(<AdminPanel currentUser={SYSADMIN} />);
-        tab('🚫 Login Gagal');
+        tab('Login Gagal');
         expect(await screen.findByText('14 login gagal dalam 7 hari terakhir')).toBeTruthy();
         expect(screen.getByText('TERKUNCI 120 dtk')).toBeTruthy();
         expect(screen.getByText('tidak terdaftar')).toBeTruthy();
@@ -107,11 +107,11 @@ describe('Memutus sesi', () => {
         ] });
         vi.mocked(api.killRemoteSession).mockResolvedValue({ status: 'killed', block: 'account', sessions: { remote: 2, web: 1, ssh: 0 } });
         render(<AdminPanel currentUser={SYSADMIN} />);
-        tab('🖥 Sesi Remote');
-        fireEvent.click(await screen.findByRole('button', { name: '⛔ Putuskan Sesi' }));
+        tab('Sesi Remote');
+        fireEvent.click(await screen.findByRole('button', { name: 'Putuskan Sesi' }));
         const dialog = screen.getByRole('dialog', { name: 'Putuskan sesi Remote' });
         fireEvent.click(within(dialog).getByLabelText(/Putuskan dan nonaktifkan akun/));
-        fireEvent.click(within(dialog).getByRole('button', { name: '⛔ Putuskan Sesi' }));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Putuskan Sesi' }));
         await within(dialog).findByText('Akun budi dinonaktifkan. Sesi yang ikut diputus: Remote 2, Web 1, SSH 0.');
         expect(api.killRemoteSession).toHaveBeenCalledWith('a1', 'account');
     });
@@ -120,11 +120,11 @@ describe('Memutus sesi', () => {
         vi.mocked(api.fetchRemoteSessions).mockResolvedValue({ sessions: [{ active_id: 'a2', username: 'budi', vm: 'x', host: 'h', start_date: 1 }] });
         vi.mocked(api.killRemoteSession).mockRejectedValue({ response: { data: { detail: 'Akses ke VM ini berasal dari grup TKJ.' } } });
         render(<AdminPanel currentUser={SYSADMIN} />);
-        tab('🖥 Sesi Remote');
-        fireEvent.click(await screen.findByRole('button', { name: '⛔ Putuskan Sesi' }));
+        tab('Sesi Remote');
+        fireEvent.click(await screen.findByRole('button', { name: 'Putuskan Sesi' }));
         const dialog = screen.getByRole('dialog');
         fireEvent.click(within(dialog).getByLabelText(/cabut akses ke VM ini/));
-        fireEvent.click(within(dialog).getByRole('button', { name: '⛔ Putuskan Sesi' }));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Putuskan Sesi' }));
         expect((await within(dialog).findByRole('alert')).textContent).toContain('grup TKJ');
         expect(api.killRemoteSession).toHaveBeenCalledWith('a2', 'vm');
     });
@@ -135,11 +135,11 @@ describe('Memutus sesi', () => {
         ] });
         vi.mocked(api.killOpenWebSession).mockResolvedValue({ status: 'revoked', block: 'none' });
         render(<AdminPanel currentUser={SYSADMIN} />);
-        tab('🌐 Sesi Web');
-        fireEvent.click(await screen.findByRole('button', { name: '⛔ Cabut Link' }));
+        tab('Sesi Web');
+        fireEvent.click(await screen.findByRole('button', { name: 'Cabut Link' }));
         const dialog = screen.getByRole('dialog', { name: 'Cabut link Open Web' });
         expect(within(dialog).getByLabelText(/nonaktifkan akun/).disabled).toBe(true);
-        fireEvent.click(within(dialog).getByRole('button', { name: '⛔ Cabut Link' }));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Cabut Link' }));
         await within(dialog).findByText('Sesi sudah diputus.');
         expect(api.killOpenWebSession).toHaveBeenCalledWith('s1', 'none');
     });
@@ -151,10 +151,10 @@ describe('Memutus sesi', () => {
         ] });
         vi.mocked(api.killSshSession).mockResolvedValue({ status: 'killed', block: 'none' });
         render(<AdminPanel currentUser={SYSADMIN} />);
-        fireEvent.click(await screen.findByRole('button', { name: '🔑 Sesi SSH' }));   // muncul setelah config SSH dimuat
-        fireEvent.click(await screen.findByRole('button', { name: '⛔ Putuskan Sesi' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Sesi SSH' }));   // muncul setelah config SSH dimuat
+        fireEvent.click(await screen.findByRole('button', { name: 'Putuskan Sesi' }));
         const dialog = screen.getByRole('dialog', { name: 'Putuskan sesi SSH' });
-        fireEvent.click(within(dialog).getByRole('button', { name: '⛔ Putuskan Sesi' }));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Putuskan Sesi' }));
         await within(dialog).findByText('Sesi sudah diputus.');
         expect(api.killSshSession).toHaveBeenCalledWith(42, 'none');
     });
@@ -162,9 +162,9 @@ describe('Memutus sesi', () => {
     it('akun pembaca saja (admin) tidak melihat tombol putuskan', async () => {
         vi.mocked(api.fetchRemoteSessions).mockResolvedValue({ sessions: [{ active_id: 'a3', username: 'budi', vm: 'x', host: 'h', start_date: 1 }] });
         render(<AdminPanel currentUser={{ id: 3, role: 'admin' }} />);
-        tab('🖥 Sesi Remote');
+        tab('Sesi Remote');
         await screen.findByText('x');
-        expect(screen.queryByRole('button', { name: '⛔ Putuskan Sesi' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Putuskan Sesi' })).toBeNull();
     });
 });
 
@@ -175,11 +175,11 @@ describe('Riwayat Remote', () => {
               start_date: 1, end_date: 2, active: false, duration_s: 3700 },
         ] });
         render(<AdminPanel currentUser={SYSADMIN} />);
-        tab('🖥 Sesi Remote');
+        tab('Sesi Remote');
         tab('Riwayat Koneksi');
         expect(await screen.findByText('100.64.1.2')).toBeTruthy();
         expect(screen.getByText('1h 1m')).toBeTruthy();
-        fireEvent.change(screen.getByLabelText('🔍 Cari user / VM'), { target: { value: 'tkj' } });
+        fireEvent.change(screen.getByLabelText('Cari user / VM'), { target: { value: 'tkj' } });
         await waitFor(() => expect(api.fetchRemoteHistory).toHaveBeenLastCalledWith(1, 50, { search: 'tkj' }));
     });
 });

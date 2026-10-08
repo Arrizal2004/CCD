@@ -34,7 +34,7 @@ export default {
     'servers.heading': ['Proxmox VE', 'Proxmox VE'],
     'servers.createVm': ['+ Create VM', '+ Create VM'],
     'servers.bulk': ['⧉ VM Massal', '⧉ Bulk VMs'],
-    'servers.manage': ['⚙ Kelola Instance', '⚙ Manage instances'],
+    'servers.manage': ['Kelola Instance', 'Manage instances'],
     'servers.noInstances': ['Belum ada Proxmox instance dikonfigurasi.', 'No Proxmox instance has been configured yet.'],
     'servers.addInstance': ['+ Tambah Instance', '+ Add instance'],
     'servers.manualHint': ['manual: {ip}', 'manual: {ip}'],
