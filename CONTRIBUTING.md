@@ -53,6 +53,38 @@ A pull request must pass the tests, `npm run lint` with no errors, and must not 
 
 This repository is public. Never commit real server IPs, domains, usernames, passwords, tokens, or `.env` files, whether in code, tests or documentation. Use placeholders (`<vps-ip>`, `dashboard.<domain>`) or example addresses (`203.0.113.x`, `example.com`).
 
+### Commits
+
+We keep the history readable. There is no strict format, but please follow these habits, which the existing history already uses:
+
+- **One logical change per commit.** The code, its tests and the documentation it affects go in the same commit, and the tests should pass at every commit. Split unrelated changes into separate commits.
+- **Title:** one short line (about 70 characters or fewer), no trailing period, describing what changed in plain words. Indonesian or English are both fine. A short prefix such as `Backend:` or `Frontend:` is welcome when a change is limited to one side. We do not require Conventional Commits.
+- **Body (optional but encouraged):** after a blank line, a few bullet points on what changed and, when it is not obvious, why. Wrap lines at roughly 80 characters.
+- **Never rewrite a migration or a published commit.** Fix mistakes with a new commit. Rewrite history (`rebase`, `--amend`, force push) only on your own branch before it is merged, never on `main`.
+- **Use your own name and email** in `git config`. If you do not want your address public, use the `noreply` address GitHub gives you.
+
+Example:
+
+```text
+Superadmin can delete helpdesk tickets
+
+- A Delete button in the ticket window (superadmin only), with a confirmation.
+- A summary is written to the audit log before the ticket is removed;
+  the conversation itself is not kept.
+- Tests cover the permissions and the audit entry.
+```
+
+Before you commit:
+
+```bash
+git status                      # only the files you meant to change?
+git diff --staged               # read it once; no secrets, no real IPs or domains
+(cd backend && pytest -q)       # see "Running the tests" above for the environment variables
+(cd frontend && npm run lint && npm test)
+```
+
+Never commit `.env`, backups, `node_modules/`, `dist/`, or any file with real credentials or user data. If a secret was committed by mistake, treat it as leaked: rotate it first, then remove it from the history.
+
 ### Pull requests
 
 - One pull request per change, with a short description of what and why.
@@ -109,6 +141,38 @@ Pull request harus lolos test, `npm run lint` tanpa error, dan jumlah peringatan
 ### Data di repositori
 
 Repositori ini publik. Jangan memasukkan IP server, domain, nama pengguna, password, token, atau berkas `.env` yang asli, baik di kode, test, maupun dokumentasi. Pakai placeholder (`<ip-vps>`, `dashboard.<domain>`) atau alamat contoh (`203.0.113.x`, `example.com`).
+
+### Commit
+
+Kami menjaga riwayat tetap mudah dibaca. Tidak ada format yang kaku, tetapi tolong ikuti kebiasaan berikut, yang memang sudah dipakai di riwayat repo ini:
+
+- **Satu perubahan logis per commit.** Kode, test-nya, dan dokumentasi yang terpengaruh ikut dalam commit yang sama, dan test sebaiknya lolos di setiap commit. Pisahkan perubahan yang tidak berhubungan menjadi commit sendiri.
+- **Judul:** satu baris pendek (sekitar 70 karakter atau kurang), tanpa titik di akhir, menjelaskan apa yang berubah dengan kata-kata sederhana. Bahasa Indonesia atau Inggris sama-sama boleh. Awalan singkat seperti `Backend:` atau `Frontend:` boleh dipakai kalau perubahannya hanya di satu sisi. Conventional Commits tidak diwajibkan.
+- **Isi (opsional tetapi dianjurkan):** setelah satu baris kosong, beberapa butir tentang apa yang berubah dan, kalau tidak jelas dengan sendirinya, mengapa. Potong baris sekitar 80 karakter.
+- **Jangan menulis ulang migrasi atau commit yang sudah dipublikasikan.** Perbaiki kesalahan dengan commit baru. Menulis ulang riwayat (`rebase`, `--amend`, force push) hanya di cabang Anda sendiri sebelum digabung, tidak pernah di `main`.
+- **Pakai nama dan email Anda sendiri** di `git config`. Kalau tidak ingin alamat email Anda terlihat publik, pakai alamat `noreply` yang diberikan GitHub.
+
+Contoh:
+
+```text
+Superadmin bisa menghapus tiket Helpdesk
+
+- Tombol Hapus di jendela tiket (khusus superadmin), dengan konfirmasi.
+- Ringkasannya dicatat di audit log sebelum tiket dihapus;
+  isi percakapan tidak disimpan.
+- Test mencakup hak akses dan catatan auditnya.
+```
+
+Sebelum commit:
+
+```bash
+git status                      # hanya berkas yang memang ingin diubah?
+git diff --staged               # baca sekali; tidak ada secret, IP atau domain asli
+(cd backend && pytest -q)       # lihat "Menjalankan test" di atas untuk variabel lingkungannya
+(cd frontend && npm run lint && npm test)
+```
+
+Jangan pernah meng-commit `.env`, backup, `node_modules/`, `dist/`, atau berkas apa pun yang berisi kredensial atau data pengguna asli. Kalau secret terlanjur ter-commit, anggap sudah bocor: ganti dulu secret-nya, baru hapus dari riwayat.
 
 ### Pull request
 
