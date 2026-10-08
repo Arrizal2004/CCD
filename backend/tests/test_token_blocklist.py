@@ -11,9 +11,11 @@ import token_blocklist
 
 @pytest.fixture(autouse=True)
 def reset_redis():
-    """Ensure blocklist Redis is cleared between tests."""
+    """Kembalikan klien Redis aplikasi setelah tiap test. Kalau dibiarkan None, test berikutnya yang
+    memanggil API dengan token gagal karena blocklist menganggap Redis mati."""
+    original = token_blocklist._redis
     yield
-    token_blocklist.set_redis(None)
+    token_blocklist.set_redis(original)
 
 
 @pytest.fixture

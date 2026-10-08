@@ -10,6 +10,7 @@ import logging
 import re
 
 from services.proxmox_client import ProxmoxError
+from i18n import tr
 
 log = logging.getLogger("proxmox_provision")
 
@@ -73,15 +74,19 @@ def build_ipconfig(ip_mode: str, ip_cidr: str | None, gateway: str | None) -> tu
         iface = ipaddress.ip_interface((ip_cidr or "").strip())
         gw = ipaddress.ip_address((gateway or "").strip())
     except ValueError:
-        raise ProvisionError("IP statis harus berformat CIDR (mis. 192.168.1.50/24) dan gateway harus alamat IPv4")
+        raise ProvisionError(tr("IP statis harus berformat CIDR (mis. 192.168.1.50/24) dan gateway harus alamat IPv4",
+                                "A static IP must use CIDR format (e.g. 192.168.1.50/24) and the gateway must be an IPv4 address"))
     if iface.version != 4 or gw.version != 4:
-        raise ProvisionError("Hanya IPv4 yang didukung")
+        raise ProvisionError(tr("Hanya IPv4 yang didukung", "Only IPv4 is supported"))
     if iface.network.prefixlen >= 31:
-        raise ProvisionError("Prefix jaringan terlalu kecil — pakai mis. /24")
+        raise ProvisionError(tr("Prefix jaringan terlalu kecil — pakai mis. /24",
+                                "The network prefix is too small — use e.g. /24"))
     if iface.ip in (iface.network.network_address, iface.network.broadcast_address):
-        raise ProvisionError("IP tidak boleh alamat network/broadcast")
+        raise ProvisionError(tr("IP tidak boleh alamat network/broadcast",
+                                "The IP may not be the network or broadcast address"))
     if gw not in iface.network or gw == iface.ip:
-        raise ProvisionError(f"Gateway {gw} harus berada di subnet {iface.network} dan berbeda dari IP VM")
+        raise ProvisionError(tr(f"Gateway {gw} harus berada di subnet {iface.network} dan berbeda dari IP VM",
+                                f"Gateway {gw} must be inside subnet {iface.network} and differ from the VM IP"))
     return f"ip={iface.with_prefixlen},gw={gw}", str(iface.ip)
 
 
@@ -90,7 +95,8 @@ def parse_dns(dns: str | None) -> str | None:
     try:
         return " ".join(str(ipaddress.ip_address(s)) for s in servers) or None
     except ValueError:
-        raise ProvisionError("DNS harus berupa alamat IP (pisahkan dengan spasi atau koma)")
+        raise ProvisionError(tr("DNS harus berupa alamat IP (pisahkan dengan spasi atau koma)",
+                                "DNS must be IP addresses (separated by spaces or commas)"))
 
 
 async def create_from_template(client, node: str, *, template_vmid: int, name: str, username: str,
@@ -98,35 +104,44 @@ async def create_from_template(client, node: str, *, template_vmid: int, name: s
                                dns: str | None, cores: int | None, memory_mb: int | None,
                                disk_gb: int | None, bridge: str | None, full_clone: bool, start: bool) -> dict:
     if not NAME_RE.match(name):
-        raise ProvisionError("Nama VM/hostname hanya huruf, angka, dan '-' (maks. 63, tidak diawali/diakhiri '-')")
+        raise ProvisionError(tr("Nama VM/hostname hanya huruf, angka, dan '-' (maks. 63, tidak diawali/diakhiri '-')",
+                                "The VM name/hostname may only contain letters, digits and '-' (max 63, not starting or ending with '-')"))
     if not USER_RE.match(username) or username == "root":
-        raise ProvisionError("Username Linux tidak valid (huruf kecil/angka/_/-, diawali huruf, bukan 'root')")
+        raise ProvisionError(tr("Username Linux tidak valid (huruf kecil/angka/_/-, diawali huruf, bukan 'root')",
+                                "Invalid Linux username (lowercase letters/digits/_/-, starting with a letter, not 'root')"))
     if not password or len(password) > 128:
-        raise ProvisionError("Password wajib diisi (maks. 128 karakter)")
+        raise ProvisionError(tr("Password wajib diisi (maks. 128 karakter)",
+                                "A password is required (max 128 characters)"))
     if bridge and not BRIDGE_RE.match(bridge):
-        raise ProvisionError("Nama bridge tidak valid")
+        raise ProvisionError(tr("Nama bridge tidak valid", "Invalid bridge name"))
     ipconfig, static_ip = build_ipconfig(ip_mode, ip_cidr, gateway)
     nameserver = parse_dns(dns)
 
     tpl = next((t for t in await list_templates(client, node) if t["vmid"] == template_vmid), None)
     if not tpl:
-        raise ProvisionError("Template tidak ditemukan (atau di luar pool dashboard)", 404)
+        raise ProvisionError(tr("Template tidak ditemukan (atau di luar pool dashboard)",
+                                "Template not found (or outside the dashboard pool)"), 404)
     if not tpl["cloudinit"]:
-        raise ProvisionError("Template belum punya CloudInit drive (Hardware → Add → CloudInit Drive)")
+        raise ProvisionError(tr("Template belum punya CloudInit drive (Hardware → Add → CloudInit Drive)",
+                                "The template has no CloudInit drive (Hardware → Add → CloudInit Drive)"))
     if disk_gb and tpl["disk_gb"] and disk_gb < tpl["disk_gb"]:
-        raise ProvisionError(f"Disk tidak bisa lebih kecil dari template ({tpl['disk_gb']} GB)")
+        raise ProvisionError(tr(f"Disk tidak bisa lebih kecil dari template ({tpl['disk_gb']} GB)",
+                                f"The disk cannot be smaller than the template ({tpl['disk_gb']} GB)"))
     existing = await client.list_vms(node)
     # Guacamole connections are keyed by VM name, so names must be unique per node.
     if any((vm.get("name") or "").lower() == name.lower() for vm in existing):
-        raise ProvisionError(f"Nama '{name}' sudah dipakai VM lain di node ini", 409)
+        raise ProvisionError(tr(f"Nama '{name}' sudah dipakai VM lain di node ini",
+                                f"The name '{name}' is already used by another VM on this node"), 409)
     if static_ip:
         for vm in existing:
             other = (await client.get_vm_config(node, vm["vmid"])).get("ipconfig0") or ""
             if f"ip={static_ip}/" in other:
-                raise ProvisionError(f"IP {static_ip} sudah dipakai cloud-init VM {vm['vmid']} ({vm.get('name')})", 409)
+                raise ProvisionError(tr(f"IP {static_ip} sudah dipakai cloud-init VM {vm['vmid']} ({vm.get('name')})",
+                                        f"IP {static_ip} is already used by the cloud-init of VM {vm['vmid']} ({vm.get('name')})"), 409)
     pool = next((r.get("pool") for r in await client.cluster_vm_resources() if r.get("vmid") == template_vmid), None)
     if not pool:
-        raise ProvisionError("Template harus berada di sebuah pool Proxmox agar VM baru tetap terlihat oleh dashboard")
+        raise ProvisionError(tr("Template harus berada di sebuah pool Proxmox agar VM baru tetap terlihat oleh dashboard",
+                                "The template must be in a Proxmox pool so the new VM stays visible to the dashboard"))
 
     for attempt in range(3):
         vmid = await client.next_vmid()
@@ -161,10 +176,12 @@ async def create_from_template(client, node: str, *, template_vmid: int, name: s
         detail = e.detail if isinstance(e, ProxmoxError) else str(e)
         try:
             await client.wait_task(node, await client.destroy_vm(node, vmid), timeout=180)
-            undo = f"VM {vmid} dihapus kembali"
+            undo = tr(f"VM {vmid} dihapus kembali", f"VM {vmid} was deleted again")
         except Exception:
-            undo = f"VM {vmid} gagal dihapus otomatis — hapus manual di Proxmox"
-        raise ProvisionError(f"Konfigurasi VM gagal: {detail[:300]} ({undo})", 502)
+            undo = tr(f"VM {vmid} gagal dihapus otomatis — hapus manual di Proxmox",
+                      f"VM {vmid} could not be deleted automatically — delete it manually in Proxmox")
+        raise ProvisionError(tr(f"Konfigurasi VM gagal: {detail[:300]} ({undo})",
+                                f"VM configuration failed: {detail[:300]} ({undo})"), 502)
 
     return {
         "vmid":      vmid,
@@ -194,17 +211,22 @@ async def destroy_vm_fully(client, node: str, vmid: int, confirm_name: str) -> d
     except ProxmoxError as e:
         # The scoped token gets 403 for VMs it cannot see (outside its pool) — same answer as "missing".
         if "does not exist" in e.detail or e.status_code == 403:
-            raise ProvisionError(f"VM {vmid} tidak ditemukan di node {node} (atau di luar pool dashboard)", 404)
+            raise ProvisionError(tr(f"VM {vmid} tidak ditemukan di node {node} (atau di luar pool dashboard)",
+                                    f"VM {vmid} not found on node {node} (or outside the dashboard pool)"), 404)
         raise
     name = cfg.get("name") or str(vmid)
     if cfg.get("template"):
-        raise ProvisionError("Template tidak bisa dihapus dari dashboard — kelola template langsung di Proxmox")
+        raise ProvisionError(tr("Template tidak bisa dihapus dari dashboard — kelola template langsung di Proxmox",
+                                "Templates cannot be deleted from the dashboard — manage templates in Proxmox directly"))
     if (confirm_name or "") != name:
-        raise ProvisionError("Konfirmasi tidak cocok — ketik nama VM persis seperti yang tertera")
+        raise ProvisionError(tr("Konfirmasi tidak cocok — ketik nama VM persis seperti yang tertera",
+                                "The confirmation does not match — type the VM name exactly as shown"))
     if str(cfg.get("protection", "0")) == "1":
-        raise ProvisionError("VM dilindungi (Protection aktif) — matikan dulu di Proxmox: Options → Protection", 409)
+        raise ProvisionError(tr("VM dilindungi (Protection aktif) — matikan dulu di Proxmox: Options → Protection",
+                                "The VM is protected (Protection is on) — turn it off in Proxmox first: Options → Protection"), 409)
     if cfg.get("lock"):
-        raise ProvisionError(f"VM sedang terkunci ({cfg['lock']}) — tunggu operasi di Proxmox selesai", 409)
+        raise ProvisionError(tr(f"VM sedang terkunci ({cfg['lock']}) — tunggu operasi di Proxmox selesai",
+                                f"The VM is locked ({cfg['lock']}) — wait for the Proxmox operation to finish"), 409)
 
     owned = re.compile(rf"([\w.-]+):((?:vm|base)-{vmid}-[\w.-]+)")
     storages = sorted({m.group(1) for v in cfg.values() if isinstance(v, str) for m in owned.finditer(v)})
@@ -216,12 +238,14 @@ async def destroy_vm_fully(client, node: str, vmid: int, confirm_name: str) -> d
     await client.wait_task(node, await client.destroy_vm(node, vmid), timeout=600)
 
     if any(v["vmid"] == vmid for v in await client.list_vms(node)):
-        raise ProvisionError(f"VM {vmid} masih terdaftar di Proxmox setelah dihapus", 500)
+        raise ProvisionError(tr(f"VM {vmid} masih terdaftar di Proxmox setelah dihapus",
+                                f"VM {vmid} is still registered in Proxmox after deletion"), 500)
     left = []
     for storage in storages:
         try:
             left += [c["volid"] for c in await client.storage_content(node, storage, vmid)]
         except ProxmoxError as e:
-            left.append(f"{storage}: tidak bisa diverifikasi (HTTP {e.status_code})")
+            left.append(tr(f"{storage}: tidak bisa diverifikasi (HTTP {e.status_code})",
+                           f"{storage}: could not be verified (HTTP {e.status_code})"))
     return {"vmid": vmid, "name": name, "stopped_first": stopped_first, "snapshots_removed": snapshots,
             "storages_checked": storages, "disks_left": left}

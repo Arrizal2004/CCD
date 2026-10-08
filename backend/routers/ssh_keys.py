@@ -19,6 +19,7 @@ from auth import get_current_user, Role
 from database import get_pool, get_student_vm_ids
 from services.audit import log_activity
 from services.ssh_audit import handle_lines
+from i18n import tr
 
 router = APIRouter()
 
@@ -33,14 +34,27 @@ def bastion_enabled() -> bool:
     return "ssh" in profiles and bool(os.getenv("BASTION_TOKEN"))
 
 
+def public_port() -> int:
+    """Port bastion di VPS; mengikuti pemetaan port di docker-compose, jadi tetap diatur di .env."""
+    return int(os.getenv("BASTION_PUBLIC_PORT") or 2222)
+
+
+async def public_host(request: Request) -> str:
+    """Alamat bastion untuk pengguna: Pengaturan Sistem, lalu BASTION_PUBLIC_HOST di .env, lalu alamat
+    yang sedang dibuka pengguna. Domain lewat proxy Cloudflare tidak meneruskan SSH, jadi dalam kasus itu
+    alamatnya perlu diisi dengan nama yang langsung ke IP VPS."""
+    from services.system_settings import get_settings
+    return (await get_settings())["ssh_public_host"] or os.getenv("BASTION_PUBLIC_HOST") or (request.url.hostname or "")
+
+
 # ── Parsing public key ─────────────────────────────────────────────────────────
 
 def _read_string(blob: bytes, off: int) -> tuple[bytes, int]:
     if off + 4 > len(blob):
-        raise ValueError("key terpotong")
+        raise ValueError(tr("key terpotong", "truncated key"))
     (n,) = struct.unpack(">I", blob[off:off + 4])
     if off + 4 + n > len(blob):
-        raise ValueError("key terpotong")
+        raise ValueError(tr("key terpotong", "truncated key"))
     return blob[off + 4:off + 4 + n], off + 4 + n
 
 
@@ -49,29 +63,33 @@ def parse_public_key(text: str) -> tuple[str, str, str]:
     Komentar di akhir baris dibuang; opsi authorized_keys di depan baris ditolak."""
     parts = text.strip().split()
     if len(parts) < 2:
-        raise ValueError("Format tidak dikenali. Tempel isi file .pub, mis. 'ssh-ed25519 AAAA... nama'")
+        raise ValueError(tr("Format tidak dikenali. Tempel isi file .pub, mis. 'ssh-ed25519 AAAA... nama'",
+                            "Unrecognised format. Paste the contents of the .pub file, e.g. 'ssh-ed25519 AAAA... name'"))
     ktype, b64 = parts[0], parts[1]
     if ktype not in _ALLOWED_TYPES:
-        raise ValueError(f"Jenis key '{ktype[:30]}' tidak didukung. Pakai ssh-ed25519 (disarankan), ecdsa, atau rsa minimal {MIN_RSA_BITS} bit")
+        raise ValueError(tr(f"Jenis key '{ktype[:30]}' tidak didukung. Pakai ssh-ed25519 (disarankan), ecdsa, atau rsa minimal {MIN_RSA_BITS} bit",
+                            f"Key type '{ktype[:30]}' is not supported. Use ssh-ed25519 (recommended), ecdsa, or rsa with at least {MIN_RSA_BITS} bits"))
     try:
         blob = base64.b64decode(b64, validate=True)
     except Exception:
-        raise ValueError("Isi key bukan base64 yang valid")
+        raise ValueError(tr("Isi key bukan base64 yang valid", "The key contents are not valid base64"))
     inner_type, off = _read_string(blob, 0)
     if inner_type.decode(errors="replace") != ktype:
-        raise ValueError("Jenis key tidak cocok dengan isinya")
+        raise ValueError(tr("Jenis key tidak cocok dengan isinya",
+                            "The key type does not match its contents"))
     if ktype == "ssh-rsa":
         e, off = _read_string(blob, off)
         n, off = _read_string(blob, off)
         bits = int.from_bytes(n, "big").bit_length()
         if bits < MIN_RSA_BITS:
-            raise ValueError(f"Key RSA {bits} bit terlalu lemah, minimal {MIN_RSA_BITS} bit. Lebih baik pakai ssh-ed25519")
+            raise ValueError(tr(f"Key RSA {bits} bit terlalu lemah, minimal {MIN_RSA_BITS} bit. Lebih baik pakai ssh-ed25519",
+                                f"A {bits}-bit RSA key is too weak; at least {MIN_RSA_BITS} bits are required. ssh-ed25519 is better"))
     elif ktype == "ssh-ed25519":
         pk, off = _read_string(blob, off)
         if len(pk) != 32:
-            raise ValueError("Key ed25519 tidak valid")
+            raise ValueError(tr("Key ed25519 tidak valid", "Invalid ed25519 key"))
     if len(blob) > 4096:
-        raise ValueError("Key terlalu panjang")
+        raise ValueError(tr("Key terlalu panjang", "The key is too long"))
     fp = "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
     return ktype, f"{ktype} {base64.b64encode(blob).decode()}", fp
 
@@ -159,8 +177,8 @@ async def ssh_config(request: Request, user: dict = Depends(get_current_user)):
     return {
         "enabled": enabled,
         "host_fingerprint": await bastion_fingerprint() if enabled else None,
-        "host": os.getenv("BASTION_PUBLIC_HOST") or (request.url.hostname or ""),
-        "port": int(os.getenv("BASTION_PUBLIC_PORT") or 2222),
+        "host": await public_host(request),
+        "port": public_port(),
         "user": "tunnel",
     }
 
@@ -186,9 +204,10 @@ async def add_key(body: KeyBody, request: Request, user: dict = Depends(get_curr
     pool = await get_pool()
     async with pool.acquire() as conn:
         if await conn.fetchval("SELECT count(*) FROM user_ssh_keys WHERE user_id = $1", uid) >= MAX_KEYS_PER_USER:
-            raise HTTPException(400, f"Maksimal {MAX_KEYS_PER_USER} SSH key per akun. Hapus key lama dulu")
+            raise HTTPException(400, tr(f"Maksimal {MAX_KEYS_PER_USER} SSH key per akun. Hapus key lama dulu",
+                                        f"At most {MAX_KEYS_PER_USER} SSH keys per account. Delete an old key first"))
         if await conn.fetchval("SELECT 1 FROM user_ssh_keys WHERE fingerprint = $1", fp):
-            raise HTTPException(409, "Key ini sudah terdaftar")
+            raise HTTPException(409, tr("Key ini sudah terdaftar", "This key is already registered"))
         row = await conn.fetchrow(
             """INSERT INTO user_ssh_keys (user_id, name, key_type, public_key, fingerprint)
                VALUES ($1, $2, $3, $4, $5) RETURNING id, name, key_type, fingerprint, created_at, last_used_at""",
@@ -206,7 +225,7 @@ async def delete_key(key_id: int, request: Request, user: dict = Depends(get_cur
             "DELETE FROM user_ssh_keys WHERE id = $1 AND user_id = $2 RETURNING name, fingerprint",
             key_id, int(user["sub"]))
     if not row:
-        raise HTTPException(404, "SSH key tidak ditemukan")
+        raise HTTPException(404, tr("SSH key tidak ditemukan", "SSH key not found"))
     await log_activity(user, "SSH_KEY_DELETE", "WARNING", {"id": row["fingerprint"], "name": row["name"]},
                        f"{user.get('username')} menghapus SSH key {row['name']} ({row['fingerprint']})", request)
     return {"status": "deleted"}
@@ -252,13 +271,16 @@ async def authorized_keys(request: Request, fingerprint: str = Query(..., max_le
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """SELECT k.id, k.name, k.fingerprint, k.public_key, u.id AS uid, u.username, u.role,
-                      u.is_active, u.deleted_at, u.is_verified
+                      u.is_active, u.deleted_at, u.is_verified,
+                      (u.expires_at IS NOT NULL AND u.expires_at <= NOW()) AS expired
                FROM user_ssh_keys k JOIN users u ON u.id = k.user_id WHERE k.fingerprint = $1""", fingerprint)
         if not row:
             return ""
         targets = []
         if not row["is_active"] or row["deleted_at"] is not None:
             reason = "akun nonaktif"
+        elif row["expired"]:
+            reason = "masa berlaku akun habis"
         elif row["role"] == Role.STUDENT and not row["is_verified"]:
             reason = "akun belum diverifikasi"
         else:
@@ -281,5 +303,25 @@ async def bastion_events(request: Request):
     _require_bastion(request)
     body = await request.body()
     if len(body) > 512 * 1024:
-        raise HTTPException(413, "Terlalu besar")
+        raise HTTPException(413, tr("Terlalu besar", "Too large"))
     return {"handled": await handle_lines(body.decode("utf-8", "replace"))}
+
+
+@router.get("/kill-wait", response_class=PlainTextResponse)
+async def bastion_kill_wait(request: Request, wait: int = Query(25, ge=1, le=30)):
+    """Long poll dari skrip ccd-kill di bastion: perintah pemutusan sesi, satu per baris
+    "<id-sesi> <pid> [<pid>]" (services/ssh_kill.py). Kosong = tidak ada perintah selama `wait` detik."""
+    _require_bastion(request)
+    from services import ssh_kill
+    orders = await ssh_kill.next_orders(wait)
+    return "".join(f"{o}\n" for o in orders)
+
+
+@router.post("/killed")
+async def bastion_killed(request: Request):
+    """Laporan ccd-kill: id sesi yang prosesnya sudah dihentikan, satu per baris."""
+    _require_bastion(request)
+    body = (await request.body())[:64 * 1024].decode("ascii", "replace")
+    ids = sorted({int(x) for x in body.split() if x.isdigit() and len(x) < 10})
+    from services import ssh_kill
+    return {"ended": await ssh_kill.acknowledge(ids)}

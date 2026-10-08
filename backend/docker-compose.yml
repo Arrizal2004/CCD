@@ -69,6 +69,8 @@ services:
       POSTGRESQL_DATABASE: guacamoledb
       POSTGRESQL_USER:     guacamole
       POSTGRESQL_PASSWORD: ${GUAC_DB_PASSWORD:-guacamole123}
+      # Catat IP pengguna (dari X-Forwarded-For yang diisi nginx), bukan IP container nginx.
+      REMOTE_IP_VALVE_ENABLED: "true"
     # Siap = webapp Tomcat sudah men-deploy /guacamole (butuh DB + skema + guacd siap lebih dulu).
     healthcheck:
       test: ["CMD-SHELL", "curl -fs -o /dev/null http://localhost:8080/guacamole/api/languages || exit 1"]
@@ -102,6 +104,9 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost}
     volumes:
       - ./static:/app/static
+      # Penghitung jaringan VPS untuk resource di halaman Status. Hanya berkas ini, read-only;
+      # penghitung jaringan di dalam container cuma berisi lalu lintas container itu sendiri.
+      - /proc/1/net/dev:/host/net_dev:ro
     # Backend baru start setelah semua dependensi benar-benar siap (bukan sekadar container berjalan).
     # Tanpa ini backend bisa start saat Guacamole belum siap → rotasi password admin Guacamole gagal
     # → Connect tidak jalan sampai backend di-restart manual.

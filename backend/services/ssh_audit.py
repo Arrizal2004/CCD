@@ -222,17 +222,25 @@ async def vm_labels(conn, targets: list[str]) -> dict[str, str]:
     return {t: by_ip[ip] for t in targets if (ip := t.rsplit(":", 1)[0]) in by_ip}
 
 
-async def list_sessions(active_only: bool, limit: int = 50, offset: int = 0) -> dict:
-    where = "WHERE ended_at IS NULL" if active_only else ""
+async def list_sessions(active_only: bool, limit: int = 50, offset: int = 0, username: str = "") -> dict:
+    where = ["ended_at IS NULL"] if active_only else []
+    args: list = []
+    if username:
+        args.append(username)
+        where.append(f"lower(username) = lower(${len(args)})")
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        total = await conn.fetchval(f"SELECT count(*) FROM ssh_sessions {where}")
+        total = await conn.fetchval(f"SELECT count(*) FROM ssh_sessions {clause}", *args)
         rows = await conn.fetch(
             f"""SELECT id, username, role, key_name, fingerprint, client_ip, targets, denied_targets,
-                       bytes_sent, bytes_received, started_at, ended_at, end_reason,
+                       bytes_sent, bytes_received, started_at, ended_at, end_reason, killed_by,
                        EXTRACT(EPOCH FROM COALESCE(ended_at, NOW()) - started_at)::int AS duration,
-                       CASE WHEN ended_at IS NULL THEN 'active' ELSE COALESCE(end_reason, 'closed') END AS status
-                FROM ssh_sessions {where} ORDER BY started_at DESC LIMIT $1 OFFSET $2""", limit, offset)
+                       CASE WHEN ended_at IS NULL THEN 'active'
+                            WHEN killed_by IS NOT NULL THEN 'killed'
+                            ELSE COALESCE(end_reason, 'closed') END AS status
+                FROM ssh_sessions {clause} ORDER BY started_at DESC
+                LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}""", *args, limit, offset)
         labels = await vm_labels(conn, [t for r in rows for t in r["targets"]])
     items = []
     for r in rows:

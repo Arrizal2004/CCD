@@ -24,13 +24,14 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-from auth import get_current_user, require_sysadmin, decode_token, Role
+from auth import get_current_user, require_sysadmin, verify_token, Role
 from database import get_pool
+from i18n import tr
 
 log = logging.getLogger(__name__)
 
@@ -78,8 +79,9 @@ async def _auth_flexible(
 ) -> dict:
     raw = credentials.credentials if credentials else token
     if not raw:
-        raise HTTPException(401, "Not authenticated", headers={"WWW-Authenticate": "Bearer"})
-    return decode_token(raw)
+        raise HTTPException(401, tr("Belum login",
+                                    "Not authenticated"), headers={"WWW-Authenticate": "Bearer"})
+    return await verify_token(raw)
 
 
 # ── Upload configuration ───────────────────────────────────────────────────────
@@ -158,11 +160,11 @@ async def _get_request_or_403(conn, req_id: str, user: dict) -> dict:
         req_id,
     )
     if not row:
-        raise HTTPException(404, "Request tidak ditemukan")
+        raise HTTPException(404, tr("Request tidak ditemukan", "Request not found"))
     r = _row(row)
     is_admin = user["role"] in _INFRA_ADMIN_ROLES
     if not is_admin and r["student_id"] != int(user["sub"]):
-        raise HTTPException(403, "Akses ditolak")
+        raise HTTPException(403, tr("Akses ditolak", "Access denied"))
     return r
 
 
@@ -171,7 +173,16 @@ async def _get_request_or_403(conn, req_id: str, user: dict) -> dict:
 @router.post("")
 async def create_request(body: CreateRequestBody, user: dict = Depends(get_current_user)):
     if body.request_type not in ("VPS", "VPN"):
-        raise HTTPException(400, "request_type harus 'VPS' atau 'VPN'")
+        raise HTTPException(400, tr("request_type harus 'VPS' atau 'VPN'",
+                                    "request_type must be 'VPS' or 'VPN'"))
+    if body.request_type == "VPS" and body.specs and body.specs.get("os"):
+        # Pilihan OS diatur superadmin di Pengaturan Sistem; simpan dengan penulisan dari daftar itu.
+        from services import system_settings
+        os_name = system_settings.match_os(await system_settings.get_settings(), body.specs["os"])
+        if not os_name:
+            raise HTTPException(400, tr(f"OS '{body.specs['os']}' tidak tersedia. Pilih salah satu OS di form",
+                                        f"OS '{body.specs['os']}' is not available. Choose one of the OS options in the form"))
+        body.specs["os"] = os_name
 
     req_id     = str(uuid.uuid4())
     specs_json = json.dumps(body.specs) if body.specs else None
@@ -246,10 +257,10 @@ async def download_document(req_id: str, user: dict = Depends(_auth_flexible)):
 
     req_dir = _UPLOAD_BASE / req_id / "doc"
     if not req_dir.is_dir():
-        raise HTTPException(404, "Dokumen belum diunggah")
+        raise HTTPException(404, tr("Dokumen belum diunggah", "No document has been uploaded"))
     files = [f for f in req_dir.iterdir() if f.is_file()]
     if not files:
-        raise HTTPException(404, "Dokumen belum diunggah")
+        raise HTTPException(404, tr("Dokumen belum diunggah", "No document has been uploaded"))
 
     fp   = files[0]
     mime = mimetypes.guess_type(str(fp))[0] or "application/octet-stream"
@@ -274,10 +285,12 @@ async def download_config(req_id: str, user: dict = Depends(_auth_flexible)):
 
     config_dir = _UPLOAD_BASE / req_id / "config"
     if not config_dir.is_dir():
-        raise HTTPException(404, "File konfigurasi belum diunggah")
+        raise HTTPException(404, tr("File konfigurasi belum diunggah",
+                                    "No configuration file has been uploaded"))
     files = [f for f in config_dir.iterdir() if f.is_file()]
     if not files:
-        raise HTTPException(404, "File konfigurasi belum diunggah")
+        raise HTTPException(404, tr("File konfigurasi belum diunggah",
+                                    "No configuration file has been uploaded"))
 
     fp   = files[0]
     mime = mimetypes.guess_type(str(fp))[0] or "application/octet-stream"
@@ -335,23 +348,28 @@ async def upload_document(
         req = await _get_request_or_403(conn, req_id, user)
 
     if req["student_id"] != int(user["sub"]):
-        raise HTTPException(403, "Hanya pemilik request yang bisa mengunggah dokumen")
+        raise HTTPException(403, tr("Hanya pemilik request yang bisa mengunggah dokumen",
+                                    "Only the request owner can upload documents"))
 
     original_name = _sanitize_filename(file.filename or "upload")
     ext = Path(original_name).suffix.lower()
     if ext not in _DOC_ALLOWED_EXTS:
-        raise HTTPException(400, f"Format tidak didukung '{ext}'. Diperbolehkan: PDF, JPG, JPEG, PNG")
+        raise HTTPException(400, tr(f"Format tidak didukung '{ext}'. Diperbolehkan: PDF, JPG, JPEG, PNG",
+                                    f"Unsupported format '{ext}'. Allowed: PDF, JPG, JPEG, PNG"))
 
     content = await file.read()
     if len(content) > _DOC_MAX_BYTES:
-        raise HTTPException(413, f"File terlalu besar ({len(content) // 1024} KB). Maksimum 5 MB")
+        raise HTTPException(413, tr(f"File terlalu besar ({len(content) // 1024} KB). Maksimum 5 MB",
+                                    f"The file is too large ({len(content) // 1024} KB). Maximum 5 MB"))
 
     declared_mime = file.content_type or ""
     if not any(declared_mime.startswith(p) for p in ("image/", "application/pdf")):
-        raise HTTPException(415, f"MIME type tidak diizinkan: '{declared_mime}'")
+        raise HTTPException(415, tr(f"MIME type tidak diizinkan: '{declared_mime}'",
+                                    f"MIME type not allowed: '{declared_mime}'"))
 
     if not _verify_magic(content, ext):
-        raise HTTPException(422, "Isi file tidak sesuai ekstensinya")
+        raise HTTPException(422, tr("Isi file tidak sesuai ekstensinya",
+                                    "The file contents do not match its extension"))
 
     doc_dir = _UPLOAD_BASE / req_id / "doc"
     doc_dir.mkdir(parents=True, exist_ok=True)
@@ -386,14 +404,16 @@ async def upload_config(
     original_name = _sanitize_filename(file.filename or "config")
     ext = Path(original_name).suffix.lower()
     if ext not in _CFG_ALLOWED_EXTS:
-        raise HTTPException(400, f"Format tidak didukung. Diperbolehkan: {', '.join(sorted(_CFG_ALLOWED_EXTS))}")
+        raise HTTPException(400, tr(f"Format tidak didukung. Diperbolehkan: {', '.join(sorted(_CFG_ALLOWED_EXTS))}",
+                                    f"Unsupported format. Allowed: {', '.join(sorted(_CFG_ALLOWED_EXTS))}"))
 
     content = await file.read()
     if len(content) > _CFG_MAX_BYTES:
-        raise HTTPException(413, "File terlalu besar (maks 20 MB)")
+        raise HTTPException(413, tr("File terlalu besar (maks 20 MB)", "The file is too large (max 20 MB)"))
 
     if not _verify_magic(content, ext):
-        raise HTTPException(422, "Magic bytes tidak sesuai ekstensi")
+        raise HTTPException(422, tr("Magic bytes tidak sesuai ekstensi",
+                                    "The file signature does not match the extension"))
 
     config_dir = _UPLOAD_BASE / req_id / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -418,7 +438,7 @@ async def upload_config(
 async def infra_ws(websocket: WebSocket, req_id: str, token: str = Query(...)):
     await websocket.accept()
     try:
-        user = decode_token(token)
+        user = await verify_token(token)
     except Exception:
         await websocket.close(code=4401)
         return
@@ -462,7 +482,8 @@ async def infra_ws(websocket: WebSocket, req_id: str, token: str = Query(...)):
             if cur_status == "DONE":
                 try:
                     await websocket.send_text(json.dumps(
-                        {"type": "error", "message": "Request sudah selesai — chat sudah ditutup"}
+                        {"type": "error", "message": tr("Request sudah selesai — chat sudah ditutup",
+                                                        "The request is finished — the chat is closed")}
                     ))
                 except Exception:
                     pass
@@ -497,12 +518,14 @@ async def infra_ws(websocket: WebSocket, req_id: str, token: str = Query(...)):
 
 @router.patch("/{req_id}/status")
 async def review_request(
-    req_id: str,
-    body:   ReviewBody,
-    user:   dict = Depends(require_sysadmin),
+    req_id:  str,
+    body:    ReviewBody,
+    request: Request,
+    user:    dict = Depends(require_sysadmin),
 ):
     if body.status not in VALID_STATUSES:
-        raise HTTPException(400, f"status harus salah satu dari: {', '.join(VALID_STATUSES)}")
+        raise HTTPException(400, tr(f"status harus salah satu dari: {', '.join(VALID_STATUSES)}",
+                                    f"status must be one of: {', '.join(VALID_STATUSES)}"))
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -533,7 +556,7 @@ async def review_request(
             req_id,
         )
         if not row:
-            raise HTTPException(404, "Request tidak ditemukan")
+            raise HTTPException(404, tr("Request tidak ditemukan", "Request not found"))
 
         # Auto-upgrade student ke akses penuh saat pertama kali DONE
         if body.status == "DONE":
@@ -546,5 +569,13 @@ async def review_request(
                     "UPDATE users SET is_verified = true, updated_at = NOW() WHERE id = $1",
                     student_id,
                 )
+
+    # VPS selesai dengan VM Proxmox tertaut: VM itu langsung milik mahasiswa yang meminta.
+    if body.status == "DONE" and row["request_type"] == "VPS" and row["linked_vm_id"] and "__" in (row["linked_host_name"] or ""):
+        from services.assignments import assign_vm
+        from services.audit import log_activity
+        if await assign_vm(row["student_id"], row["linked_vm_id"], row["linked_host_name"], row["linked_vm_name"]):
+            await log_activity(user, "RBAC_ASSIGN_VM", "WARNING", {"id": row["linked_vm_id"], "name": row["linked_host_name"]},
+                               f"Assign VM {row['linked_vm_id']} ke user #{row['student_id']} (otomatis dari request VPS {req_id})", request)
 
     return _row(row)

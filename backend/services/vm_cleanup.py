@@ -7,6 +7,7 @@ purpose (audit trail).
 """
 from database import get_pool
 from services import guac_sync as g
+from i18n import tr
 
 # FKs between these are ON DELETE SET NULL / CASCADE, so the order is not load-bearing.
 _TABLES = ("vm_assignments", "group_vm_access", "vm_os_accounts", "vm_credentials", "vm_metadata",
@@ -35,7 +36,8 @@ async def remove_guac_connections(host_name: str, vm_names: set[str | None]) -> 
     mains = {g._conn_name(host_name, n) for n in vm_names if n}
     conns, status = await g._fetch("GET", f"/session/data/{g.GUAC_DS}/connections")
     if status != 200 or not isinstance(conns, dict):
-        raise RuntimeError(f"Guacamole tidak tersedia (HTTP {status})")
+        raise RuntimeError(tr(f"Guacamole tidak tersedia (HTTP {status})",
+                              f"Guacamole is unavailable (HTTP {status})"))
     targets = {
         cid: c.get("name", "") for cid, c in conns.items()
         if isinstance(c, dict) and any(c.get("name") == m or c.get("name", "").startswith(m + "@") for m in mains)

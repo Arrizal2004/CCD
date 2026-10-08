@@ -17,7 +17,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from auth import decode_token, Role
+from auth import verify_token, Role
 from database import get_pool
 from services.vm_agent_poller import LIVE_CHANNEL
 
@@ -41,7 +41,7 @@ async def metrics_live(
 ):
     # Auth: validasi JWT
     try:
-        user = decode_token(token)
+        user = await verify_token(token)
     except Exception:
         await websocket.close(code=4401)
         return

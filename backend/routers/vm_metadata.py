@@ -7,6 +7,7 @@ from database import get_pool
 from schemas import VmMetadataResponse
 from auth import get_current_user, Role
 from services.ssh_client import encrypt_secret, decrypt_secret
+from i18n import tr
 
 router = APIRouter()
 log = logging.getLogger("vm_metadata")
@@ -63,9 +64,10 @@ async def upsert_metadata(
     # RBAC: student hanya boleh ubah description untuk VM yang di-assign ke dirinya
     if not is_admin:
         if user["role"] != Role.STUDENT:
-            raise HTTPException(403, "Role tidak diizinkan")
+            raise HTTPException(403, tr("Role tidak diizinkan", "Role not allowed"))
         if not await _student_owns_vm(user, host_name, vm_id):
-            raise HTTPException(403, "Anda tidak punya akses ke VM ini")
+            raise HTTPException(403, tr("Anda tidak punya akses ke VM ini",
+                                        "You do not have access to this VM"))
         # Field privileged diabaikan untuk student (hanya description yang dipakai)
         body = VmMetadataUpsert(description=body.description)
 
@@ -97,7 +99,8 @@ async def upsert_metadata(
 @router.delete("/{host_name}/{vm_id}")
 async def delete_metadata(host_name: str, vm_id: str, user: dict = Depends(get_current_user)):
     if user["role"] not in _ADMIN_ROLES:
-        raise HTTPException(403, "Aksi ini hanya untuk admin/sysadmin")
+        raise HTTPException(403, tr("Aksi ini hanya untuk admin/sysadmin",
+                                    "Only admins/sysadmins can do this"))
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(

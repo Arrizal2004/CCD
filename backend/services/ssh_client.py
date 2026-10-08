@@ -14,6 +14,7 @@ import socket
 import time
 import paramiko
 from cryptography.fernet import Fernet
+from i18n import tr
 
 log = logging.getLogger("ssh_client")
 
@@ -105,7 +106,8 @@ class SshClient:
         elif self.password:
             kwargs["password"] = self.password
         else:
-            raise ValueError("Harus menyediakan password atau private key")
+            raise ValueError(tr("Harus menyediakan password atau private key",
+                                "A password or private key is required"))
         try:
             client.connect(**kwargs)
         except Exception:

@@ -1,0 +1,31 @@
+#!/bin/sh
+# Memutus sesi SSH atas perintah admin (Admin → Sesi SSH → Putuskan Sesi).
+# Menunggu perintah dari backend lewat long poll; setiap baris berisi "<id-sesi> <pid> [<pid>]".
+# PID hanya dihentikan kalau memang proses sesi sshd (bukan sshd utama), lalu id sesinya dilaporkan
+# ke backend supaya sesi ditandai berakhir. Dijalankan sebagai root karena proses sesi milik root
+# (monitor) dan user tunnel.
+URL=http://backend:8000/api/v1/ssh-keys
+HDR=/etc/ssh/bastion-header
+
+while :; do
+    orders=$(curl -fsS --max-time 40 -H @"$HDR" "$URL/kill-wait?wait=25" 2>/dev/null) || { sleep 5; continue; }
+    [ -n "$orders" ] || continue
+    done_ids=""
+    main=$(cat /run/sshd.pid 2>/dev/null)
+    while read -r sid pids; do
+        case "$sid" in ''|*[!0-9]*) continue ;; esac
+        for pid in $pids; do
+            case "$pid" in ''|*[!0-9]*) continue ;; esac
+            [ "$pid" -gt 1 ] && [ "$pid" != "$main" ] || continue
+            case "$(cat /proc/"$pid"/comm 2>/dev/null)" in
+                sshd-session|sshd) kill -TERM "$pid" 2>/dev/null && echo "ccd-kill: sesi $sid, proses $pid dihentikan" >&2 ;;
+            esac
+        done
+        done_ids="$done_ids$sid
+"
+    done <<ORDERS
+$orders
+ORDERS
+    [ -n "$done_ids" ] && printf '%s' "$done_ids" | curl -fsS --max-time 10 -H @"$HDR" \
+        -H 'Content-Type: text/plain' --data-binary @- "$URL/killed" >/dev/null 2>&1
+done

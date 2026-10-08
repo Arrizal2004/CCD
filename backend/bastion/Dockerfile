@@ -9,10 +9,10 @@ RUN apk add --no-cache openssh-server curl \
  && mkdir -p /data /run/sshd
 
 COPY sshd_config /etc/ssh/sshd_config
-COPY ccd-keys ccd-audit /usr/local/bin/
+COPY ccd-keys ccd-audit ccd-kill /usr/local/bin/
 COPY entrypoint.sh /entrypoint.sh
-RUN chown root:root /usr/local/bin/ccd-keys /usr/local/bin/ccd-audit /entrypoint.sh \
- && chmod 755 /usr/local/bin/ccd-keys /usr/local/bin/ccd-audit /entrypoint.sh
+RUN chown root:root /usr/local/bin/ccd-keys /usr/local/bin/ccd-audit /usr/local/bin/ccd-kill /entrypoint.sh \
+ && chmod 755 /usr/local/bin/ccd-keys /usr/local/bin/ccd-audit /usr/local/bin/ccd-kill /entrypoint.sh
 
 EXPOSE 2222
 # Cek proses, bukan koneksi ke port 2222, supaya log tidak dipenuhi koneksi healthcheck.

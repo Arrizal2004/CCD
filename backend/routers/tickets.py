@@ -21,7 +21,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from database import get_pool, get_student_vm_ids
-from auth import get_current_user, decode_token, Role
+from auth import get_current_user, verify_token, Role
+from i18n import tr
 
 # ── Flexible auth: Bearer header OR ?token= query param ──────────────────────
 # <img src> / <a href> cannot set headers, so the download endpoint also
@@ -34,9 +35,9 @@ async def _auth_flexible(
 ) -> dict:
     raw = credentials.credentials if credentials else token
     if not raw:
-        raise HTTPException(401, "Not authenticated",
+        raise HTTPException(401, tr("Belum login", "Not authenticated"),
                             headers={"WWW-Authenticate": "Bearer"})
-    return decode_token(raw)  # raises 401 on expired / invalid
+    return await verify_token(raw)  # raises 401 on expired / invalid
 from services.audit import log_activity
 
 router = APIRouter()
@@ -149,7 +150,6 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 _ADMIN_ROLES = (Role.SUPERADMIN, Role.SYSADMIN)
-CATEGORIES = ("REMOTE_ISSUE", "PERFORMANCE", "RESOURCE_REQUEST", "OTHERS")
 STATUSES   = ("OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED")
 
 
@@ -182,7 +182,8 @@ async def _resolve_vm(body: CreateTicket) -> tuple[Optional[str], Optional[str],
             row = await conn.fetchrow(
                 "SELECT vm_id, host_name, ccd_id, vm_name, state FROM vms WHERE ccd_id = $1", ccd) if ccd else None
             if not row:
-                raise HTTPException(400, f"CCDID '{body.ccd_id[:20]}' tidak ditemukan")
+                raise HTTPException(400, tr(f"CCDID '{body.ccd_id[:20]}' tidak ditemukan",
+                                            f"CCDID '{body.ccd_id[:20]}' not found"))
             return row["vm_id"], row["host_name"], row["ccd_id"], dict(row)
         if body.vm_id and body.host_name:
             row = await conn.fetchrow(
@@ -238,7 +239,7 @@ async def _system_msg(conn, ticket_id: int, text: str) -> dict:
 @router.post("")
 async def create_ticket(body: CreateTicket, request: Request, user: dict = Depends(get_current_user)):
     if not body.title.strip():
-        raise HTTPException(400, "Judul wajib diisi")
+        raise HTTPException(400, tr("Judul wajib diisi", "A title is required"))
     # Unverified students (self-registered, no approved infra request yet) cannot open tickets
     if user.get("role") == Role.STUDENT:
         pool = await get_pool()
@@ -249,8 +250,10 @@ async def create_ticket(body: CreateTicket, request: Request, user: dict = Depen
         if not verified:
             raise HTTPException(
                 403,
-                "Akses terbatas. Ajukan Infrastructure Request dan tunggu persetujuan admin "
-                "untuk mendapatkan akses penuh ke fitur Helpdesk."
+                tr("Akses terbatas. Ajukan Infrastructure Request dan tunggu persetujuan admin "
+                   "untuk mendapatkan akses penuh ke fitur Helpdesk.",
+                   "Limited access. Submit an infrastructure request and wait for admin approval "
+                   "to get full access to the Helpdesk.")
             )
     vm_id, host_name, ccd_id, vm = await _resolve_vm(body)
     # VMID hanya unik per Proxmox, jadi yang dicek pasangan host + VMID: mahasiswa hanya boleh
@@ -258,9 +261,11 @@ async def create_ticket(body: CreateTicket, request: Request, user: dict = Depen
     if user.get("role") == Role.STUDENT and host_name and \
             (vm_id, host_name) not in await get_student_vm_ids(int(user["sub"])):
         if body.ccd_id:   # pesan sama dengan CCDID yang tidak ada, supaya CCDID VM lain tidak bisa ditebak
-            raise HTTPException(400, f"CCDID '{body.ccd_id[:20]}' tidak ditemukan")
-        raise HTTPException(403, "VM ini tidak ditugaskan kepada Anda")
-    category = body.category if body.category in CATEGORIES else "OTHERS"
+            raise HTTPException(400, tr(f"CCDID '{body.ccd_id[:20]}' tidak ditemukan",
+                                        f"CCDID '{body.ccd_id[:20]}' not found"))
+        raise HTTPException(403, tr("VM ini tidak ditugaskan kepada Anda", "This VM is not assigned to you"))
+    from services.system_settings import category_keys, get_settings
+    category = body.category if body.category in category_keys(await get_settings()) else "OTHERS"
     snapshot = body.vm_snapshot or ({"vm_name": vm["vm_name"], "state": vm["state"]} if vm else None)
     snap = json.dumps(snapshot) if snapshot else None
     pool = await get_pool()
@@ -290,7 +295,7 @@ async def list_tickets(
         where.append(f"t.student_id = ${i}"); params.append(int(user["sub"])); i += 1
     if status in STATUSES:
         where.append(f"t.status = ${i}"); params.append(status); i += 1
-    if category in CATEGORIES:
+    if category and len(category) <= 30 and category.replace("_", "").isalnum():   # termasuk kategori lama
         where.append(f"t.category = ${i}"); params.append(category); i += 1
     if search:
         where.append(f"(t.title ILIKE ${i} OR t.ticket_number ILIKE ${i} OR u.username ILIKE ${i} "
@@ -314,9 +319,10 @@ async def _get_ticket_or_403(conn, ticket_id: int, user: dict) -> dict:
         """SELECT t.*, u.username AS student_name FROM tickets t
            JOIN users u ON u.id = t.student_id WHERE t.id = $1""", ticket_id)
     if not r:
-        raise HTTPException(404, "Tiket tidak ditemukan")
+        raise HTTPException(404, tr("Tiket tidak ditemukan", "Ticket not found"))
     if not _is_admin(user) and r["student_id"] != int(user["sub"]):
-        raise HTTPException(403, "Anda tidak punya akses ke tiket ini")
+        raise HTTPException(403, tr("Anda tidak punya akses ke tiket ini",
+                                    "You do not have access to this ticket"))
     return dict(r)
 
 
@@ -352,38 +358,45 @@ async def upload_ticket_file(
     async with pool.acquire() as conn:
         t = await _get_ticket_or_403(conn, ticket_id, user)
     if t["status"] == "CLOSED":
-        raise HTTPException(403, "Tiket sudah ditutup — tidak bisa mengunggah lampiran.")
+        raise HTTPException(403, tr("Tiket sudah ditutup — tidak bisa mengunggah lampiran.",
+                                    "The ticket is closed — attachments can no longer be uploaded."))
 
     # 1 — Sanitise original filename (null bytes, unicode tricks, path separators)
     original_name = _sanitize_filename(file.filename or "upload")
     ext = Path(original_name).suffix.lower()
     if ext not in _ALLOWED_EXTS:
-        raise HTTPException(400, f"Ekstensi tidak diizinkan: {ext or '(tidak ada)'}. "
-                                  f"Diizinkan: {', '.join(sorted(_ALLOWED_EXTS))}")
+        raise HTTPException(400, tr(f"Ekstensi tidak diizinkan: {ext or '(tidak ada)'}. "
+                                    f"Diizinkan: {', '.join(sorted(_ALLOWED_EXTS))}",
+                                    f"Extension not allowed: {ext or '(none)'}. "
+                                    f"Allowed: {', '.join(sorted(_ALLOWED_EXTS))}"))
 
     content = await file.read()
 
     # 2 — Size gate
     if len(content) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(413, "File terlalu besar (maks 10 MB)")
+        raise HTTPException(413, tr("File terlalu besar (maks 10 MB)", "The file is too large (max 10 MB)"))
 
     # 3 — MIME check (Content-Type header, can be spoofed — magic bytes below is the real guard)
     mime = file.content_type or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
     if not any(mime.startswith(p) for p in _ALLOWED_MIME_PREFIXES):
-        raise HTTPException(400, f"MIME type tidak diizinkan: {mime}")
+        raise HTTPException(400, tr(f"MIME type tidak diizinkan: {mime}", f"MIME type not allowed: {mime}"))
 
     # 4 — Magic bytes validation: file content MUST match declared extension.
     #     Blocks polyglot files (e.g. HTML disguised as .jpg for stored XSS).
     if not _verify_magic(content, ext):
         raise HTTPException(400,
-            f"Isi file tidak sesuai dengan ekstensi {ext}. "
-            "File kemungkinan dimanipulasi atau disamarkan.")
+            tr(f"Isi file tidak sesuai dengan ekstensi {ext}. "
+               "File kemungkinan dimanipulasi atau disamarkan.",
+               f"The file contents do not match the {ext} extension. "
+               "The file may have been tampered with or disguised."))
 
     # 5 — ZIP bomb detection: check declared-uncompressed ratio without extraction.
     if ext == ".zip" and not _check_zip_bomb(content):
         raise HTTPException(400,
-            "File ZIP ditolak: rasio kompresi mencurigakan atau ukuran ekstraksi "
-            "melampaui batas (ZIP bomb).")
+            tr("File ZIP ditolak: rasio kompresi mencurigakan atau ukuran ekstraksi "
+               "melampaui batas (ZIP bomb).",
+               "ZIP file refused: suspicious compression ratio or extracted size "
+               "over the limit (ZIP bomb)."))
 
     ticket_dir = _UPLOAD_BASE / str(ticket_id)
     ticket_dir.mkdir(parents=True, exist_ok=True)
@@ -424,11 +437,11 @@ async def download_ticket_file(
     # Strip directory components — must be a bare filename
     safe_name = Path(stored_name).name
     if not safe_name or safe_name != stored_name:
-        raise HTTPException(400, "Nama file tidak valid")
+        raise HTTPException(400, tr("Nama file tidak valid", "Invalid file name"))
 
     file_path = _UPLOAD_BASE / str(ticket_id) / safe_name
     if not file_path.is_file():
-        raise HTTPException(404, "File tidak ditemukan")
+        raise HTTPException(404, tr("File tidak ditemukan", "File not found"))
 
     # RBAC: ensure user may access this ticket (raises 403/404 otherwise)
     pool = await get_pool()
@@ -459,19 +472,22 @@ async def download_ticket_file(
 @router.patch("/{ticket_id}/status")
 async def update_status(ticket_id: int, body: StatusUpdate, request: Request, user: dict = Depends(get_current_user)):
     if not _is_admin(user):
-        raise HTTPException(403, "Hanya admin/sysadmin yang dapat mengubah status")
+        raise HTTPException(403, tr("Hanya admin/sysadmin yang dapat mengubah status",
+                                    "Only admins/sysadmins can change the status"))
     if body.status not in STATUSES:
-        raise HTTPException(400, f"Status tidak valid. Pilihan: {STATUSES}")
+        raise HTTPException(400, tr(f"Status tidak valid. Pilihan: {STATUSES}",
+                                    f"Invalid status. Options: {STATUSES}"))
     pool = await get_pool()
     async with pool.acquire() as conn:
         cur = await conn.fetchrow(
             "SELECT status, ticket_number FROM tickets WHERE id = $1", ticket_id)
         if not cur:
-            raise HTTPException(404, "Tiket tidak ditemukan")
+            raise HTTPException(404, tr("Tiket tidak ditemukan", "Ticket not found"))
         number = cur["ticket_number"]
         # Tiket yang sudah CLOSED terkunci: hanya superadmin yang boleh membuka/mengubah lagi.
         if cur["status"] == "CLOSED" and user["role"] != Role.SUPERADMIN:
-            raise HTTPException(403, "Tiket sudah ditutup. Hanya superadmin yang dapat membukanya kembali.")
+            raise HTTPException(403, tr("Tiket sudah ditutup. Hanya superadmin yang dapat membukanya kembali.",
+                                        "The ticket is closed. Only a superadmin can reopen it."))
         if cur["status"] == body.status:
             return {"status": body.status, "ticket_number": number}
         # Set closed_at saat menutup; bersihkan saat dibuka kembali.
@@ -502,15 +518,16 @@ async def reply_ticket(ticket_id: int, body: ReplyBody, request: Request, user: 
     att_url  = (body.attachment_url or "").strip()
     att_name = (body.attachment_name or "").strip()
     if not msg and not att_url:
-        raise HTTPException(400, "Pesan atau lampiran diperlukan")
+        raise HTTPException(400, tr("Pesan atau lampiran diperlukan", "A message or attachment is required"))
     # Guard: attachment URL must belong to this ticket's upload folder
     if att_url and not att_url.startswith(f"/api/tickets/{ticket_id}/files/"):
-        raise HTTPException(400, "URL lampiran tidak valid")
+        raise HTTPException(400, tr("URL lampiran tidak valid", "Invalid attachment URL"))
     pool = await get_pool()
     async with pool.acquire() as conn:
         t = await _get_ticket_or_403(conn, ticket_id, user)  # enforces ownership/RBAC
         if t["status"] == "CLOSED":
-            raise HTTPException(403, "Tiket sudah ditutup — tidak bisa menambahkan pesan.")
+            raise HTTPException(403, tr("Tiket sudah ditutup — tidak bisa menambahkan pesan.",
+                                        "The ticket is closed — no more messages can be added."))
         row = await conn.fetchrow(
             """INSERT INTO ticket_messages
                (ticket_id, sender_id, sender_role, sender_name, message, attachment_url, attachment_name)
@@ -546,7 +563,7 @@ async def ticket_ws(websocket: WebSocket, ticket_id: int, token: str = Query(...
     await websocket.accept()
     # Auth: validasi JWT pada handshake
     try:
-        user = decode_token(token)
+        user = await verify_token(token)
     except Exception:
         await websocket.close(code=4401)
         return
@@ -593,7 +610,8 @@ async def ticket_ws(websocket: WebSocket, ticket_id: int, token: str = Query(...
             if cur and cur["status"] == "CLOSED":
                 try:
                     await websocket.send_text(json.dumps(
-                        {"type": "error", "message": "Tiket sudah ditutup — tidak bisa menambahkan pesan."}))
+                        {"type": "error", "message": tr("Tiket sudah ditutup — tidak bisa menambahkan pesan.",
+                                                        "The ticket is closed — no more messages can be added.")}))
                 except Exception:
                     pass
                 continue

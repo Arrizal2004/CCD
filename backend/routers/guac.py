@@ -23,9 +23,10 @@ import logging
 import os
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException
-from auth import decode_token
+from auth import verify_token
 from database import get_pool
 from services.ssh_client import decrypt_secret
+from i18n import tr
 
 logger = logging.getLogger("guac")
 
@@ -169,8 +170,10 @@ async def _load_vm_creds(vm_id_or_name: str, host_name: str) -> dict:
     if not row:
         raise HTTPException(
             status_code=404,
-            detail="Credentials VM belum dikonfigurasi. "
-                   "Buka tab 'Koneksi' → pilih OS & isi credentials."
+            detail=tr("Credentials VM belum dikonfigurasi. "
+                      "Buka tab 'Koneksi' → pilih OS & isi credentials.",
+                      "The VM credentials are not configured. "
+                      "Set them in the VM details window.")
         )
     password = decrypt_secret(row["password_enc"]) if row["password_enc"] else ""
     pkey     = decrypt_secret(row["pkey_enc"])     if row["pkey_enc"]     else ""
@@ -247,7 +250,7 @@ async def guac_tunnel(
     """
     # Auth
     try:
-        user_info = decode_token(token)
+        user_info = await verify_token(token)
         username = user_info.get("username", "")
     except Exception:
         logger.warning("guac: token tidak valid dari %s", websocket.client)

@@ -31,6 +31,7 @@ ini membuat fitur generik yang sudah ada (ssh_creds, vm_metadata, guac_sync, gro
 dipakai untuk VM Proxmox multi-instance tanpa perubahan lebih lanjut di sana.
 """
 import asyncio
+from datetime import datetime, timedelta, timezone
 import logging
 import re
 import time
@@ -48,7 +49,9 @@ from services.audit import log_activity
 from services import proxmox_provision as provision
 from services.vm_credentials import save_vm_credentials
 from services import vm_cleanup
+from services import networks
 from services import proxmox_iops_poller as iops_poller
+from i18n import tr
 
 router = APIRouter()
 log = logging.getLogger("proxmox")
@@ -58,7 +61,8 @@ _ADMIN_ROLES = (Role.SUPERADMIN, Role.SYSADMIN)
 
 def _require_admin(user: dict):
     if user.get("role") not in _ADMIN_ROLES:
-        raise HTTPException(status_code=403, detail="Aksi ini hanya untuk admin/sysadmin/superadmin")
+        raise HTTPException(status_code=403, detail=tr("Aksi ini hanya untuk admin/sysadmin/superadmin",
+                                                       "Only admins/sysadmins/superadmins can do this"))
 
 
 async def _require_admin_or_assigned(user: dict, host_key: str, vmid: int):
@@ -68,7 +72,8 @@ async def _require_admin_or_assigned(user: dict, host_key: str, vmid: int):
         return
     allowed = await get_student_vm_ids(int(user["sub"]), host_key)
     if (str(vmid), host_key) not in allowed:
-        raise HTTPException(status_code=403, detail="Anda tidak punya akses ke VM ini")
+        raise HTTPException(status_code=403, detail=tr("Anda tidak punya akses ke VM ini",
+                                                       "You do not have access to this VM"))
 
 
 def _host_key(label: str, node: str) -> str:
@@ -132,6 +137,9 @@ async def get_all_vms(user: dict = Depends(get_current_user)):
     dipakai picker VM generik (mis. link request VPS ke VM Proxmox yang sudah ada)."""
     _require_admin(user)
     result = []
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        ccd_ids = {(r["vm_id"], r["host_name"]): r["ccd_id"] for r in await conn.fetch("SELECT vm_id, host_name, ccd_id FROM vms")}
     for inst in await pve_instances.list_instances():
         label = inst["label"]
         try:
@@ -150,10 +158,13 @@ async def get_all_vms(user: dict = Depends(get_current_user)):
             for vm in vms:
                 if vm.get("template"):
                     continue
+                host_key = _host_key(label, node_name)
                 result.append({
                     "vm_id":     str(vm["vmid"]),
                     "vm_name":   vm.get("name") or str(vm["vmid"]),
-                    "host_name": _host_key(label, node_name),
+                    "host_name": host_key,
+                    "ccd_id":    ccd_ids.get((str(vm["vmid"]), host_key)),
+                    "status":    vm.get("status"),
                 })
     return result
 
@@ -224,35 +235,59 @@ async def get_instances(user: dict = Depends(get_current_user)):
 
 
 @router.post("/instances")
-async def post_instance(body: InstanceCreateRequest, user: dict = Depends(get_current_user)):
+async def post_instance(body: InstanceCreateRequest, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
     if not body.label or not body.label.replace("_", "").replace("-", "").isalnum():
-        raise HTTPException(status_code=400, detail="Label hanya boleh huruf/angka/underscore/dash")
+        raise HTTPException(status_code=400, detail=tr("Label hanya boleh huruf/angka/underscore/dash",
+                                                       "The label may only contain letters, digits, underscores and dashes"))
     existing = await pve_instances.get_instance(body.label)
     if existing:
-        raise HTTPException(status_code=409, detail="Label instance sudah dipakai")
-    return await pve_instances.create_instance(
+        raise HTTPException(status_code=409, detail=tr("Label instance sudah dipakai",
+                                                       "This instance label is already used"))
+    created = await pve_instances.create_instance(
         body.label, body.host, body.token_id, body.token_secret, body.verify_ssl
     )
+    await log_activity(user, "PVE_INSTANCE_ADD", "WARNING", {"id": body.label, "name": body.label},
+                       f"{user.get('username')} menambahkan instance Proxmox '{body.label}' ({body.host}, "
+                       f"token {body.token_id}, verifikasi SSL {'aktif' if body.verify_ssl else 'mati'})", request)
+    return created
 
 
 @router.put("/instances/{label}")
-async def put_instance(label: str, body: InstanceUpdateRequest, user: dict = Depends(get_current_user)):
+async def put_instance(label: str, body: InstanceUpdateRequest, request: Request,
+                       user: dict = Depends(get_current_user)):
     _require_admin(user)
+    old = await pve_instances.get_instance(label)
     updated = await pve_instances.update_instance(
         label, body.host, body.token_id, body.token_secret, body.verify_ssl
     )
     if not updated:
-        raise HTTPException(status_code=404, detail="Instance tidak ditemukan")
+        raise HTTPException(status_code=404, detail=tr("Instance tidak ditemukan", "Instance not found"))
+    changes = []
+    if body.host is not None and body.host != (old or {}).get("host"):
+        changes.append(f"alamat {(old or {}).get('host')} → {body.host}")
+    if body.token_id is not None and body.token_id != (old or {}).get("token_id"):
+        changes.append(f"token {(old or {}).get('token_id')} → {body.token_id}")
+    if body.token_secret:
+        changes.append("secret token diganti")
+    if body.verify_ssl is not None and body.verify_ssl != (old or {}).get("verify_ssl"):
+        changes.append(f"verifikasi SSL {'aktif' if body.verify_ssl else 'mati'}")
+    if changes:
+        await log_activity(user, "PVE_INSTANCE_UPDATE", "WARNING", {"id": label, "name": label},
+                           f"{user.get('username')} mengubah instance Proxmox '{label}': {'; '.join(changes)}", request)
     return updated
 
 
 @router.delete("/instances/{label}")
-async def delete_instance(label: str, user: dict = Depends(get_current_user)):
+async def delete_instance(label: str, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    old = await pve_instances.get_instance(label)
     ok = await pve_instances.delete_instance(label)
     if not ok:
-        raise HTTPException(status_code=404, detail="Instance tidak ditemukan")
+        raise HTTPException(status_code=404, detail=tr("Instance tidak ditemukan", "Instance not found"))
+    await log_activity(user, "PVE_INSTANCE_DELETE", "CRITICAL", {"id": label, "name": label},
+                       f"{user.get('username')} menghapus instance Proxmox '{label}' ({(old or {}).get('host', '')})",
+                       request)
     return {"status": "deleted"}
 
 
@@ -315,8 +350,8 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT vm_id, ssh_host, ssh_port FROM vm_credentials WHERE host_name = $1", host_key)
-        ccd_ids = {r["vm_id"]: r["ccd_id"] for r in await conn.fetch(
-            "SELECT vm_id, ccd_id FROM vms WHERE host_name = $1", host_key)}
+        vm_rows = {r["vm_id"]: r for r in await conn.fetch(
+            "SELECT vm_id, ccd_id, lease_until FROM vms WHERE host_name = $1", host_key)}
     manual = {r["vm_id"]: r["ssh_host"] for r in rows if r["ssh_host"]}
     ssh_ports = {r["vm_id"]: r["ssh_port"] for r in rows if r["ssh_host"]}
     if user.get("role") not in _ADMIN_ROLES:
@@ -325,7 +360,9 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
     agent = await _agent_ips(client, label, node, running)
     for vm in vms:
         vid = str(vm["vmid"])
-        vm["ccd_id"] = ccd_ids.get(vid)   # nomor unik lintas Proxmox (lihat migrations/V006)
+        meta = vm_rows.get(vid)
+        vm["ccd_id"] = meta["ccd_id"] if meta else None   # nomor unik lintas Proxmox (migrations/V006)
+        vm["lease_until"] = meta["lease_until"].isoformat() if meta and meta["lease_until"] else None
         if vid in visible:
             vm["ip"] = agent.get(vid)
             vm["manual_ip"] = manual.get(vid)
@@ -371,6 +408,15 @@ async def get_vm_detail(label: str, node: str, vmid: int, user: dict = Depends(g
 @router.post("/instances/{label}/nodes/{node}/vms/{vmid}/action")
 async def post_vm_action(label: str, node: str, vmid: int, body: VmActionRequest, user: dict = Depends(get_current_user)):
     await _require_admin_or_assigned(user, _host_key(label, node), vmid)
+    if user.get("role") not in _ADMIN_ROLES and body.action in ("start", "resume", "reboot"):
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            expired = await conn.fetchval(
+                "SELECT lease_until <= NOW() FROM vms WHERE vm_id = $1 AND host_name = $2",
+                str(vmid), _host_key(label, node))
+        if expired:
+            raise HTTPException(status_code=403, detail=tr("Masa sewa VM ini sudah habis. Ajukan perpanjangan lewat Helpdesk.",
+                                                           "This VM's lease has expired. Request an extension through the Helpdesk."))
     client = await _get_client(label)
     try:
         upid = await client.vm_action(node, vmid, body.action)
@@ -443,7 +489,8 @@ async def put_vm_resources(label: str, node: str, vmid: int, body: VmResourcesRe
     storage hanya boleh diperbesar, tidak pernah diperkecil."""
     _require_admin(user)
     if body.memory_mb is None and body.cores is None and body.disk_size_gb is None:
-        raise HTTPException(status_code=400, detail="Tidak ada perubahan yang diminta")
+        raise HTTPException(status_code=400, detail=tr("Tidak ada perubahan yang diminta",
+                                                       "No changes were requested"))
     client = await _get_client(label)
     try:
         status = await client.get_vm_status(node, vmid)
@@ -452,16 +499,19 @@ async def put_vm_resources(label: str, node: str, vmid: int, body: VmResourcesRe
         raise HTTPException(status_code=502, detail=e.detail)
 
     if status.get("status") != "stopped":
-        raise HTTPException(status_code=409, detail="VM harus dalam kondisi mati (stopped) sebelum diubah")
+        raise HTTPException(status_code=409, detail=tr("VM harus dalam kondisi mati (stopped) sebelum diubah",
+                                                       "The VM must be stopped before it can be changed"))
     if config.get("lock"):
-        raise HTTPException(status_code=409, detail=f"VM sedang terkunci oleh operasi lain ({config['lock']})")
+        raise HTTPException(status_code=409, detail=tr(f"VM sedang terkunci oleh operasi lain ({config['lock']})",
+                                                       f"The VM is locked by another operation ({config['lock']})"))
 
     changes, config_update = [], {}
     cur_mem, cur_cores = int(config.get("memory") or 0), int(config.get("cores") or 1)
 
     if body.memory_mb is not None and body.memory_mb != cur_mem:
         if not 256 <= body.memory_mb <= _MAX_MEMORY_MB:
-            raise HTTPException(status_code=400, detail=f"RAM harus 256 - {_MAX_MEMORY_MB} MB")
+            raise HTTPException(status_code=400, detail=tr(f"RAM harus 256 - {_MAX_MEMORY_MB} MB",
+                                                           f"RAM must be 256 - {_MAX_MEMORY_MB} MB"))
         config_update["memory"] = body.memory_mb
         balloon = int(config.get("balloon") or 0)
         if balloon > body.memory_mb:
@@ -470,7 +520,8 @@ async def put_vm_resources(label: str, node: str, vmid: int, body: VmResourcesRe
 
     if body.cores is not None and body.cores != cur_cores:
         if not 1 <= body.cores <= _MAX_CORES:
-            raise HTTPException(status_code=400, detail=f"CPU harus 1 - {_MAX_CORES} core")
+            raise HTTPException(status_code=400, detail=tr(f"CPU harus 1 - {_MAX_CORES} core",
+                                                           f"CPU must be 1 - {_MAX_CORES} cores"))
         config_update["cores"] = body.cores
         changes.append(f"CPU {cur_cores}->{body.cores}core")
 
@@ -482,9 +533,11 @@ async def put_vm_resources(label: str, node: str, vmid: int, body: VmResourcesRe
             max_cpu = int((ns.get("cpuinfo") or {}).get("cpus") or 0)
             max_mem = int((ns.get("memory") or {}).get("total") or 0) // (1024 * 1024)
             if "cores" in config_update and max_cpu and config_update["cores"] * sockets > max_cpu:
-                raise HTTPException(status_code=400, detail=f"CPU melebihi kapasitas node ({max_cpu} thread)")
+                raise HTTPException(status_code=400, detail=tr(f"CPU melebihi kapasitas node ({max_cpu} thread)",
+                                                               f"CPU exceeds the node capacity ({max_cpu} threads)"))
             if "memory" in config_update and max_mem and config_update["memory"] > max_mem:
-                raise HTTPException(status_code=400, detail=f"RAM melebihi kapasitas node ({max_mem} MB)")
+                raise HTTPException(status_code=400, detail=tr(f"RAM melebihi kapasitas node ({max_mem} MB)",
+                                                               f"RAM exceeds the node capacity ({max_mem} MB)"))
         except HTTPException:
             raise
         except Exception:
@@ -493,18 +546,21 @@ async def put_vm_resources(label: str, node: str, vmid: int, body: VmResourcesRe
     disk_resize = None
     if body.disk_size_gb is not None:
         if not body.disk_key or not _DISK_KEY_RE.match(body.disk_key):
-            raise HTTPException(status_code=400, detail="disk_key tidak valid")
+            raise HTTPException(status_code=400, detail=tr("disk_key tidak valid", "Invalid disk_key"))
         disk = next((d for d in _vm_disks(config) if d["key"] == body.disk_key), None)
         if not disk:
-            raise HTTPException(status_code=400, detail=f"Disk {body.disk_key} tidak ditemukan pada VM ini")
+            raise HTTPException(status_code=400, detail=tr(f"Disk {body.disk_key} tidak ditemukan pada VM ini",
+                                                           f"Disk {body.disk_key} not found on this VM"))
         if body.disk_size_gb < disk["size_gb"]:
-            raise HTTPException(status_code=400, detail=f"Storage hanya bisa diperbesar, tidak bisa diperkecil (sekarang {disk['size_gb']:g} GB)")
+            raise HTTPException(status_code=400, detail=tr(f"Storage hanya bisa diperbesar, tidak bisa diperkecil (sekarang {disk['size_gb']:g} GB)",
+                                                           f"Storage can only grow, never shrink (currently {disk['size_gb']:g} GB)"))
         if body.disk_size_gb > disk["size_gb"]:
             disk_resize = (body.disk_key, body.disk_size_gb)
             changes.append(f"disk {body.disk_key} {disk['size_gb']:g}->{body.disk_size_gb}GB")
 
     if not changes:
-        raise HTTPException(status_code=400, detail="Nilai sama dengan yang sekarang, tidak ada perubahan")
+        raise HTTPException(status_code=400, detail=tr("Nilai sama dengan yang sekarang, tidak ada perubahan",
+                                                       "The values are the same as now; nothing changed"))
 
     applied = []
     try:
@@ -515,8 +571,10 @@ async def put_vm_resources(label: str, node: str, vmid: int, body: VmResourcesRe
             await client.resize_disk(node, vmid, disk_resize[0], f"{disk_resize[1]}G")
             applied.append(next(c for c in changes if c.startswith("disk")))
     except ProxmoxError as e:
-        done = f" Sudah diterapkan: {', '.join(applied)}." if applied else ""
-        raise HTTPException(status_code=502, detail=f"Proxmox menolak perubahan: {e.detail[:300]}.{done}")
+        done = tr(f" Sudah diterapkan: {', '.join(applied)}.",
+                  f" Already applied: {', '.join(applied)}.") if applied else ""
+        raise HTTPException(status_code=502, detail=tr(f"Proxmox menolak perubahan: {e.detail[:300]}.{done}",
+                                                       f"Proxmox refused the change: {e.detail[:300]}.{done}"))
 
     try:
         await log_activity(
@@ -582,7 +640,8 @@ _IOPS_WINDOWS = {
 @router.get("/instances/{label}/nodes/{node}/vms/{vmid}/iops")
 async def get_iops(label: str, node: str, vmid: int, timeframe: str = "1h", user: dict = Depends(get_current_user)):
     if timeframe not in _IOPS_WINDOWS:
-        raise HTTPException(status_code=400, detail=f"timeframe harus salah satu dari {', '.join(_IOPS_WINDOWS)}")
+        raise HTTPException(status_code=400, detail=tr(f"timeframe harus salah satu dari {', '.join(_IOPS_WINDOWS)}",
+                                                       f"timeframe must be one of {', '.join(_IOPS_WINDOWS)}"))
     await _require_admin_or_assigned(user, _host_key(label, node), vmid)
     lookback, bucket = _IOPS_WINDOWS[timeframe]
     pool = await get_pool()
@@ -601,7 +660,8 @@ async def get_iops(label: str, node: str, vmid: int, timeframe: str = "1h", user
 @router.get("/instances/{label}/nodes/{node}/vms/{vmid}/rrddata")
 async def get_rrddata(label: str, node: str, vmid: int, timeframe: str = "hour", user: dict = Depends(get_current_user)):
     if timeframe not in ("hour", "day", "week", "month", "year"):
-        raise HTTPException(status_code=400, detail="timeframe harus salah satu dari hour/day/week/month/year")
+        raise HTTPException(status_code=400, detail=tr("timeframe harus salah satu dari hour/day/week/month/year",
+                                                       "timeframe must be one of hour/day/week/month/year"))
     await _require_admin_or_assigned(user, _host_key(label, node), vmid)
     client = await _get_client(label)
     try:
@@ -626,7 +686,8 @@ async def get_snapshots(label: str, node: str, vmid: int, user: dict = Depends(g
 async def post_snapshot(label: str, node: str, vmid: int, body: SnapshotCreateRequest, user: dict = Depends(get_current_user)):
     await _require_admin_or_assigned(user, _host_key(label, node), vmid)
     if not body.snapname or not body.snapname.replace("_", "").replace("-", "").isalnum():
-        raise HTTPException(status_code=400, detail="Nama snapshot hanya boleh huruf/angka/underscore/dash")
+        raise HTTPException(status_code=400, detail=tr("Nama snapshot hanya boleh huruf/angka/underscore/dash",
+                                                       "Snapshot names may only contain letters, digits, underscores and dashes"))
     client = await _get_client(label)
     try:
         upid = await client.create_snapshot(node, vmid, body.snapname, body.description)
@@ -705,6 +766,8 @@ class CreateVmRequest(BaseModel):
     bridge: str | None = None
     full_clone: bool = False
     start: bool = True
+    lease_days: int | None = Field(None, ge=1, le=3650)   # masa sewa; kosong = tanpa batas
+    network_id: int | None = None   # switch CCD: bridge, gateway, DNS dari switch; IP kosong = otomatis
 
 
 @router.get("/instances/{label}/nodes/{node}/templates")
@@ -720,21 +783,38 @@ async def get_templates(label: str, node: str, user: dict = Depends(get_current_
 @router.post("/instances/{label}/nodes/{node}/vms")
 async def create_vm(label: str, node: str, body: CreateVmRequest, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    return await create_vm_core(label, node, body, user, request)
+
+
+async def create_vm_core(label: str, node: str, body: CreateVmRequest, user: dict, request: Request | None = None,
+                         wait_for_agent: bool = True) -> dict:
+    """Clone template + cloud-init, catat VM di dashboard, dan simpan kredensial Connect. Dipakai form
+    Create VM dan pembuatan VM massal (services/vm_batches.py). Kesalahan dikembalikan sebagai HTTPException.
+    wait_for_agent=False melewati penantian IP dari guest agent kalau IP-nya statis (VM massal)."""
     client = await _get_client(label)
     host_key = _host_key(label, node)
+    ip_cidr, gateway, dns, bridge = body.ip_cidr, body.gateway, body.dns, (body.bridge or "").strip() or None
+    switch = None
+    if body.network_id is not None:
+        if body.ip_mode != "static":
+            raise HTTPException(400, tr("Switch CCD tidak menyediakan DHCP. Pakai IP statis; kosongkan IP supaya dibagikan otomatis",
+                                        "CCD switches have no DHCP. Use a static IP; leave the IP empty to have one assigned automatically"))
+        switch = await networks.vm_settings(label, body.network_id, body.ip_cidr, body.dns)
+        ip_cidr, gateway, dns, bridge = switch["ip_cidr"], switch["gateway"], switch["dns"], switch["bridge"]
     if body.ip_mode == "static":
-        ip = (body.ip_cidr or "").split("/")[0].strip()
+        ip = (ip_cidr or "").split("/")[0].strip()
         pool = await get_pool()
         async with pool.acquire() as conn:
             clash = await conn.fetchrow("SELECT vm_id, host_name FROM vm_credentials WHERE ssh_host = $1", ip)
         if clash:
-            raise HTTPException(status_code=409, detail=f"IP {ip} sudah dipakai VM {clash['vm_id']} ({clash['host_name']}) di dashboard")
+            raise HTTPException(status_code=409, detail=tr(f"IP {ip} sudah dipakai VM {clash['vm_id']} ({clash['host_name']}) di dashboard",
+                                                           f"IP {ip} is already used by VM {clash['vm_id']} ({clash['host_name']}) in the dashboard"))
     try:
         vm = await provision.create_from_template(
             client, node, template_vmid=body.template_vmid, name=body.name.strip(),
             username=body.username.strip(), password=body.password, ip_mode=body.ip_mode,
-            ip_cidr=body.ip_cidr, gateway=body.gateway, dns=body.dns, cores=body.cores,
-            memory_mb=body.memory_mb, disk_gb=body.disk_gb, bridge=(body.bridge or "").strip() or None,
+            ip_cidr=ip_cidr, gateway=gateway, dns=dns, cores=body.cores,
+            memory_mb=body.memory_mb, disk_gb=body.disk_gb, bridge=bridge,
             full_clone=body.full_clone, start=body.start)
     except provision.ProvisionError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
@@ -750,7 +830,14 @@ async def create_vm(label: str, node: str, body: CreateVmRequest, request: Reque
         log.warning("Pre-clean of Guacamole connections for new VM %s failed", vm["vmid"], exc_info=True)
     await _sync_vms_table(host_key, [{"vmid": vm["vmid"], "name": vm["name"],
                                       "status": "running" if vm["started"] else "stopped"}])
-    agent_ip = await provision.wait_for_agent_ip(client, node, vm["vmid"]) if vm["started"] else None
+    if body.lease_days:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE vms SET lease_until = NOW() + make_interval(days => $3) WHERE vm_id = $1 AND host_name = $2",
+                str(vm["vmid"]), host_key, body.lease_days)
+    need_agent = vm["started"] and (wait_for_agent or not vm["static_ip"])
+    agent_ip = await provision.wait_for_agent_ip(client, node, vm["vmid"]) if need_agent else None
     ssh_host = vm["static_ip"] or agent_ip or ""
     linux = vm["os_type"] == "linux"
     await save_vm_credentials(
@@ -761,10 +848,55 @@ async def create_vm(label: str, node: str, body: CreateVmRequest, request: Reque
         await log_activity(
             user, "VM_CREATE", "WARNING", {"id": str(vm["vmid"]), "name": f"{label}/{node}/{vm['vmid']}"},
             f"{user.get('username')} membuat VM {vm['name']} ({vm['vmid']}, {vm['clone']} clone) dari template "
-            f"{body.template_vmid} di {label}/{node}", request)
+            f"{body.template_vmid} di {label}/{node}" + (f", switch '{switch['name']}' {ip_cidr}" if switch else ""), request)
     except Exception:
         pass
-    return {**vm, "agent_ip": agent_ip, "connect_ready": bool(ssh_host)}
+    return {**vm, "agent_ip": agent_ip, "connect_ready": bool(ssh_host), "switch": switch["name"] if switch else None}
+
+
+class LeaseRequest(BaseModel):
+    until: datetime | None = None        # tanggal baru; null bersama clear=true = tanpa batas
+    add_days: int | None = Field(None, ge=-3650, le=3650)
+    clear: bool = False
+
+
+@router.put("/instances/{label}/nodes/{node}/vms/{vmid}/lease")
+async def put_vm_lease(label: str, node: str, vmid: int, body: LeaseRequest, request: Request,
+                       user: dict = Depends(get_current_user)):
+    """Atur masa sewa VM (admin). add_days menambah dari batas sekarang, atau dari hari ini kalau
+    masa sewanya sudah habis; angka negatif mengurangi. Kalau batas baru masih di depan, VM boleh
+    dinyalakan lagi oleh mahasiswa."""
+    _require_admin(user)
+    host_key = _host_key(label, node)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT vm_name, ccd_id, lease_until FROM vms WHERE vm_id = $1 AND host_name = $2",
+                                  str(vmid), host_key)
+        if not row:
+            raise HTTPException(404, tr("VM belum tercatat di dashboard. Buka daftar VM-nya dulu.",
+                                        "The VM is not recorded in the dashboard yet. Open its VM list first."))
+        now = datetime.now(timezone.utc)
+        if body.clear:
+            new = None
+        elif body.until is not None:
+            new = body.until if body.until.tzinfo else body.until.replace(tzinfo=timezone.utc)
+        elif body.add_days:
+            cur = row["lease_until"]
+            base = max(cur, now) if (cur and body.add_days > 0) else (cur or now)
+            new = base + timedelta(days=body.add_days)
+        else:
+            raise HTTPException(400, tr("Isi tanggal, jumlah hari, atau pilih hapus batas",
+                                        "Enter a date or a number of days, or choose to remove the limit"))
+        await conn.execute(
+            """UPDATE vms SET lease_until = $3,
+                   lease_enforced_at = CASE WHEN $3::timestamptz IS NULL OR $3 > NOW() THEN NULL ELSE lease_enforced_at END
+               WHERE vm_id = $1 AND host_name = $2""", str(vmid), host_key, new)
+    before = row["lease_until"].strftime("%Y-%m-%d %H:%M") if row["lease_until"] else "tanpa batas"
+    after = new.strftime("%Y-%m-%d %H:%M") if new else "tanpa batas"
+    await log_activity(user, "VM_LEASE_UPDATE", "INFO", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
+                       f"{user.get('username')} mengubah masa sewa VM {row['vm_name']} (CCD-{row['ccd_id']:04d}): "
+                       f"{before} -> {after} UTC", request)
+    return {"lease_until": new.isoformat() if new else None}
 
 
 @router.delete("/instances/{label}/nodes/{node}/vms/{vmid}")
@@ -781,7 +913,8 @@ async def delete_vm(label: str, node: str, vmid: int, confirm_name: str, request
     except provision.ProvisionError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except ProxmoxError as e:
-        raise HTTPException(status_code=502, detail=f"Proxmox menolak menghapus VM: {e.detail[:300]}")
+        raise HTTPException(status_code=502, detail=tr(f"Proxmox menolak menghapus VM: {e.detail[:300]}",
+                                                       f"Proxmox refused to delete the VM: {e.detail[:300]}"))
 
     # The VM is gone from Proxmox from here on, so the dashboard cleanup always runs.
     guac_removed, guac_error = 0, None

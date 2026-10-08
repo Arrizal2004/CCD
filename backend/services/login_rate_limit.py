@@ -61,3 +61,27 @@ async def record_success(username: str) -> None:
         await _redis.delete(f"login:fail:{_norm(username)}")
     except Exception:
         pass
+
+
+async def clear(username: str) -> None:
+    """Hapus hitungan gagal dan kuncian login, mis. setelah admin mereset password akun ini."""
+    if not _redis:
+        return
+    try:
+        await _redis.delete(f"login:fail:{_norm(username)}", f"login:lock:{_norm(username)}")
+    except Exception:
+        pass
+
+
+async def allow(key: str, limit: int, window: int) -> bool:
+    """Batas sederhana: paling banyak `limit` kali per `window` detik untuk satu kunci. Kalau Redis
+    tidak tersedia, permintaan dibiarkan lewat (sama seperti kuncian login di atas)."""
+    if not _redis:
+        return True
+    try:
+        n = await _redis.incr(f"rl:{key}")
+        if n == 1:
+            await _redis.expire(f"rl:{key}", window)
+        return n <= limit
+    except Exception:
+        return True

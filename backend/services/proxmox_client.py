@@ -14,6 +14,7 @@ rather than a single fixed PROXMOX_HOST/TOKEN_ID/TOKEN_SECRET env var).
 import asyncio
 
 import httpx
+from i18n import tr
 
 
 def _first_ipv4(agent_result) -> str | None:
@@ -83,6 +84,11 @@ class ProxmoxClient:
             raise ValueError(f"action harus salah satu dari {valid}, dapat: {action}")
         return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/{action}")
 
+    async def shutdown_vm(self, node: str, vmid: int, timeout: int = 120) -> str:
+        """Shutdown lewat ACPI; kalau guest tidak mati dalam `timeout` detik, Proxmox memaksanya mati."""
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/shutdown",
+                                   data={"timeout": timeout, "forceStop": 1})
+
     async def create_snapshot(self, node: str, vmid: int, snapname: str, description: str = "") -> str:
         return await self._request(
             "POST", f"/nodes/{node}/qemu/{vmid}/snapshot",
@@ -138,10 +144,12 @@ class ProxmoxClient:
             if st.get("status") == "stopped":
                 exit_status = st.get("exitstatus") or ""
                 if exit_status != "OK" and not exit_status.startswith("WARNINGS"):
-                    raise ProxmoxError(500, f"Task {st.get('type')} gagal: {exit_status}")
+                    raise ProxmoxError(500, tr(f"Task {st.get('type')} gagal: {exit_status}",
+                                               f"Task {st.get('type')} failed: {exit_status}"))
                 return
             if loop.time() > deadline:
-                raise ProxmoxError(504, f"Task {st.get('type')} belum selesai setelah {timeout} detik")
+                raise ProxmoxError(504, tr(f"Task {st.get('type')} belum selesai setelah {timeout} detik",
+                                           f"Task {st.get('type')} did not finish after {timeout} seconds"))
             await asyncio.sleep(2)
 
     async def get_rrddata(self, node: str, vmid: int, timeframe: str = "hour") -> list[dict]:
@@ -177,3 +185,68 @@ class ProxmoxClient:
     async def enable_guest_agent(self, node: str, vmid: int) -> None:
         """Turns the VM's QEMU Guest Agent option on. Takes effect on the next full stop/start."""
         await self._request("PUT", f"/nodes/{node}/qemu/{vmid}/config", data={"agent": "1"})
+
+    async def agent_ping(self, node: str, vmid: int) -> None:
+        """ProxmoxError when the guest agent does not answer (option off, not installed, or not started)."""
+        await self._request("POST", f"/nodes/{node}/qemu/{vmid}/agent/ping")
+
+    async def agent_exec(self, node: str, vmid: int, command: list[str], timeout: float = 30) -> dict:
+        """Run a program inside the guest through the guest agent and wait for it: {exitcode, out, err}.
+        `command` is an argv list, never a shell string, so arguments are passed through as-is."""
+        started = await self._request("POST", f"/nodes/{node}/qemu/{vmid}/agent/exec", json={"command": command})
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            st = await self._request("GET", f"/nodes/{node}/qemu/{vmid}/agent/exec-status", params={"pid": started["pid"]})
+            if st.get("exited"):
+                return {"exitcode": st.get("exitcode", -1), "out": st.get("out-data", ""), "err": st.get("err-data", "")}
+            if loop.time() > deadline:
+                raise ProxmoxError(504, tr(f"{command[0]} di dalam VM belum selesai setelah {timeout:.0f} detik",
+                                           f"{command[0]} inside the VM did not finish after {timeout:.0f} seconds"))
+            await asyncio.sleep(0.5)
+
+    async def agent_set_user_password(self, node: str, vmid: int, username: str, password: str) -> None:
+        """Set an existing guest user's password (no old password, SSH or guest network needed)."""
+        await self._request("POST", f"/nodes/{node}/qemu/{vmid}/agent/set-user-password",
+                            data={"username": username, "password": password})
+
+    # ── SDN: switch yang dibuat dari dashboard (VNet + subnet di zone tipe Simple) ──────────────
+
+    async def permissions(self, path: str) -> dict:
+        """Hak token ini pada satu path ACL, mis. '/sdn/zones/ccd' → {'SDN.Allocate': 1, ...}."""
+        data = await self._request("GET", "/access/permissions", params={"path": path})
+        return (data or {}).get(path) or {}
+
+    async def node_networks(self, node: str) -> list[dict]:
+        return await self._request("GET", f"/nodes/{node}/network")
+
+    async def sdn_zones(self) -> list[dict]:
+        return await self._request("GET", "/cluster/sdn/zones")
+
+    async def sdn_vnets(self) -> list[dict]:
+        return await self._request("GET", "/cluster/sdn/vnets")
+
+    async def create_vnet(self, vnet: str, zone: str, alias: str) -> None:
+        await self._request("POST", "/cluster/sdn/vnets", data={"vnet": vnet, "zone": zone, "alias": alias})
+
+    async def update_vnet(self, vnet: str, alias: str) -> None:
+        await self._request("PUT", f"/cluster/sdn/vnets/{vnet}", data={"alias": alias})
+
+    async def delete_vnet(self, vnet: str) -> None:
+        await self._request("DELETE", f"/cluster/sdn/vnets/{vnet}")
+
+    async def create_subnet(self, vnet: str, cidr: str, gateway: str, snat: bool) -> None:
+        await self._request("POST", f"/cluster/sdn/vnets/{vnet}/subnets",
+                            data={"subnet": cidr, "type": "subnet", "gateway": gateway, "snat": int(snat)})
+
+    async def update_subnet(self, vnet: str, subnet_id: str, snat: bool) -> None:
+        await self._request("PUT", f"/cluster/sdn/vnets/{vnet}/subnets/{subnet_id}", data={"snat": int(snat)})
+
+    async def delete_subnet(self, vnet: str, subnet_id: str) -> None:
+        await self._request("DELETE", f"/cluster/sdn/vnets/{vnet}/subnets/{subnet_id}")
+
+    async def sdn_apply(self) -> None:
+        """Terapkan perubahan SDN yang masih pending (Proxmox memuat ulang jaringan host) dan tunggu selesai."""
+        upid = await self._request("PUT", "/cluster/sdn")
+        if isinstance(upid, str) and upid.startswith("UPID:"):
+            await self.wait_task(upid.split(":")[1], upid, timeout=120)

@@ -17,8 +17,9 @@ import secrets
 import select as _select
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from auth import decode_token
+from auth import verify_token
 from routers.ssh_creds import get_vm_ssh_client
+from i18n import tr
 
 router = APIRouter()
 
@@ -37,7 +38,7 @@ async def terminal_linux(
 ):
     # Autentikasi dari query param
     try:
-        user = decode_token(token)
+        user = await verify_token(token)
     except Exception:
         await websocket.close(code=4401)
         return
@@ -77,7 +78,7 @@ async def terminal_linux(
     try:
         channel, ssh_client = await client.open_pty(rows=24, cols=80)
     except Exception as e:
-        await _send(websocket, {"type": "error", "message": f"SSH gagal: {e}"})
+        await _send(websocket, {"type": "error", "message": tr(f"SSH gagal: {e}", f"SSH failed: {e}")})
         await websocket.close()
         return
 
@@ -103,7 +104,8 @@ async def terminal_linux(
         except Exception:
             pass
         try:
-            await _send(websocket, {"type": "closed", "message": "Sesi SSH ditutup"})
+            await _send(websocket, {"type": "closed", "message": tr("Sesi SSH ditutup",
+                                                                    "SSH session closed")})
             await websocket.close()
         except Exception:
             pass
@@ -190,7 +192,7 @@ async def terminal_windows(
     User mengetik perintah PS, tekan Enter → agent eksekusi → output kembali.
     """
     try:
-        user = decode_token(token)
+        user = await verify_token(token)
     except Exception:
         await websocket.close(code=4401)
         return
@@ -319,7 +321,8 @@ async def terminal_windows(
             else:
                 input_buf += char
 
-    await _send(websocket, {"type": "closed", "message": "Sesi terminal ditutup"})
+    await _send(websocket, {"type": "closed", "message": tr("Sesi terminal ditutup",
+                                                            "Terminal session closed")})
     try:
         await websocket.close()
     except Exception:

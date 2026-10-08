@@ -154,18 +154,24 @@ async def ensure_admin_password() -> None:
     log.warning("Rotated Guacamole admin password from the default to GUAC_ADMIN_PASS")
 
 
-async def get_user_token(username: str, password: str) -> dict:
+async def get_user_token(username: str, password: str, client_ip: str = "") -> dict:
     """
     Authenticate user ke Guacamole, return full response dict.
     Keys: authToken, dataSource, username, availableDataSources.
     Return {} jika gagal.
+    client_ip: IP pengguna yang login ke dashboard. Guacamole mencatat IP pembuat token sebagai IP
+    klien setiap sesi Remote; tanpa header ini yang tercatat adalah IP container backend. Guacamole
+    menerima X-Forwarded-For dari jaringan Docker lewat RemoteIpValve (docker-compose.yml).
     """
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    if client_ip:
+        headers["X-Forwarded-For"] = client_ip
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 f"{GUAC_URL}/api/tokens",
                 data={"username": username, "password": password},
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                headers=headers,
             )
         if resp.status_code == 200:
             return resp.json()
@@ -467,12 +473,12 @@ async def sync_vm_assignments(
     log.info("Guacamole assignment synced: %s → %d connections", username, len(target_ids))
 
 
-async def _connection_names() -> dict:
-    """Map connectionIdentifier → name (untuk resolve target VM)."""
+async def _connection_info() -> dict:
+    """Map connectionIdentifier → (name, protocol) untuk menampilkan VM tujuan sesi aktif."""
     data, s = await _fetch("GET", f"/session/data/{GUAC_DS}/connections")
     if s != 200 or not isinstance(data, dict):
         return {}
-    return {cid: c.get("name", "") for cid, c in data.items() if isinstance(c, dict)}
+    return {cid: (c.get("name", ""), c.get("protocol", "")) for cid, c in data.items() if isinstance(c, dict)}
 
 
 async def get_active_sessions() -> list[dict]:
@@ -480,23 +486,27 @@ async def get_active_sessions() -> list[dict]:
     data, s = await _fetch("GET", f"/session/data/{GUAC_DS}/activeConnections")
     if s != 200 or not isinstance(data, dict):
         return []
-    names = await _connection_names()
+    from services.remote_history import split_name, _own_ips
+    info = await _connection_info()
     out = []
     for active_id, a in data.items():
         if not isinstance(a, dict):
             continue
         conn_id = a.get("connectionIdentifier", "")
-        name = names.get(conn_id, conn_id)
-        # name: HV/{host}/{vm} → ambil bagian VM & host
-        parts = name.split("/", 2) if name else []
+        name, protocol = info.get(conn_id, (conn_id, ""))
+        # name: HV/{host}/{vm} atau HV/{host}/{vm}@{akun-os}
+        host, vm, os_user = split_name(name)
+        ip = a.get("remoteHost", "")
         out.append({
             "active_id":   active_id,
             "username":    a.get("username", ""),
-            "remote_host": a.get("remoteHost", ""),
+            "remote_host": "" if ip in _own_ips() else ip,
             "start_date":  a.get("startDate"),
             "connection":  name,
-            "host":        parts[1] if len(parts) >= 3 else "",
-            "vm":          parts[2] if len(parts) >= 3 else name,
+            "host":        host,
+            "vm":          vm,
+            "os_account":  os_user,
+            "protocol":    (protocol or "").upper(),
         })
     return out
 

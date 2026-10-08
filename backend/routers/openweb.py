@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from auth import get_current_user, Role, SECRET_KEY
 from database import get_pool, get_student_vm_ids
 from services.audit import log_activity
+from i18n import tr
 
 router = APIRouter()
 
@@ -117,17 +118,23 @@ async def touch_session(sid: str, client_ip: str) -> bool:
     return True
 
 
-async def list_sessions(active_only: bool, limit: int = 50, offset: int = 0) -> dict:
-    where = "WHERE revoked_at IS NULL AND expires_at > NOW()" if active_only else ""
+async def list_sessions(active_only: bool, limit: int = 50, offset: int = 0, username: str = "") -> dict:
+    where = ["revoked_at IS NULL AND expires_at > NOW()"] if active_only else []
+    args: list = []
+    if username:
+        args.append(username)
+        where.append(f"lower(username) = lower(${len(args)})")
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
     pool = await get_pool()
     async with pool.acquire() as conn:
-        total = await conn.fetchval(f"SELECT count(*) FROM openweb_sessions {where}")
+        total = await conn.fetchval(f"SELECT count(*) FROM openweb_sessions {clause}", *args)
         rows = await conn.fetch(
             f"""SELECT id, username, role, target_ip, created_at, expires_at, revoked_at, revoked_by,
                        last_seen, hits, last_ip, client_ips,
                        CASE WHEN revoked_at IS NOT NULL THEN 'revoked'
                             WHEN expires_at <= NOW() THEN 'expired' ELSE 'active' END AS status
-                FROM openweb_sessions {where} ORDER BY created_at DESC LIMIT $1 OFFSET $2""", limit, offset)
+                FROM openweb_sessions {clause} ORDER BY created_at DESC
+                LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}""", *args, limit, offset)
     return {"total": total, "items": [dict(r) for r in rows]}
 
 
@@ -137,7 +144,7 @@ async def revoke_session(sid: str, by: str) -> dict | None:
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """UPDATE openweb_sessions SET revoked_at = NOW(), revoked_by = $2
-               WHERE id = $1 AND revoked_at IS NULL RETURNING username, target_ip""", sid, by)
+               WHERE id = $1 AND revoked_at IS NULL RETURNING username, role, target_ip""", sid, by)
     _cache.pop(sid, None)
     return dict(row) if row else None
 
@@ -146,20 +153,23 @@ async def revoke_session(sid: str, by: str) -> dict | None:
 async def create_ticket(body: TicketBody, request: Request, user: dict = Depends(get_current_user)):
     u = urlsplit(body.url.strip())
     if u.scheme != "http":
-        raise HTTPException(400, "Proxy hanya mendukung alamat http:// untuk IP privat")
+        raise HTTPException(400, tr("Proxy hanya mendukung alamat http:// untuk IP privat",
+                                    "The proxy only supports http:// addresses for private IPs"))
     try:
         ip = ipaddress.IPv4Address(u.hostname or "")
         port = u.port
     except ValueError:
-        raise HTTPException(400, "Alamat harus berupa IP privat yang valid")
+        raise HTTPException(400, tr("Alamat harus berupa IP privat yang valid",
+                                    "The address must be a valid private IP"))
     if not _is_private_target(ip):
-        raise HTTPException(400, "Alamat bukan IP privat")
+        raise HTTPException(400, tr("Alamat bukan IP privat", "The address is not a private IP"))
 
     if user["role"] == Role.STUDENT:
         if str(ip) not in await _student_ips(int(user["sub"])):
-            raise HTTPException(403, "Anda hanya boleh membuka web di VM yang ditugaskan kepada Anda")
+            raise HTTPException(403, tr("Anda hanya boleh membuka web di VM yang ditugaskan kepada Anda",
+                                        "You may only open web pages on VMs assigned to you"))
     elif not Role.has_permission(user["role"], Role.SYSADMIN):
-        raise HTTPException(403, "Tidak diizinkan")
+        raise HTTPException(403, tr("Tidak diizinkan", "Not allowed"))
 
     host = f"{ip}:{port}" if port else str(ip)
     sid = uuid.uuid4().hex
@@ -186,8 +196,9 @@ async def auth_check(request: Request):
     m = _PATH_RE.match(request.headers.get("X-Original-URI", ""))
     data = _verify(m.group(1)) if m else None
     if not data or data.get("h") != m.group(2) or not data.get("s"):
-        raise HTTPException(403, "Tiket tidak valid atau kedaluwarsa")
+        raise HTTPException(403, tr("Tiket tidak valid atau kedaluwarsa", "Invalid or expired ticket"))
     if not await touch_session(data["s"], request.headers.get("X-Real-IP", "")):
-        raise HTTPException(403, "Sesi sudah dicabut atau kedaluwarsa")
+        raise HTTPException(403, tr("Sesi sudah dicabut atau kedaluwarsa",
+                                    "The session was revoked or has expired"))
     from fastapi import Response
     return Response(status_code=204)

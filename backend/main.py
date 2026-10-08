@@ -36,9 +36,10 @@ class _SecureUploadsStaticFiles(StaticFiles):
 
 from database import init_db, close_pool, run_cleanup_job
 from auth import require_superadmin
+from i18n import LanguageMiddleware
 from routers import vm_metadata, users
 from routers import ssh_creds, linux_vm, terminal, metrics_ws, admin, tickets
-from routers import infra_requests, groups, guac, proxmox, tailscale, openweb, ssh_keys
+from routers import infra_requests, groups, guac, proxmox, openweb, ssh_keys, system, networks, vm_batches
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client: aioredis.Redis = None
@@ -55,6 +56,8 @@ async def lifespan(app: FastAPI):
     token_blocklist.set_redis(redis_client)
     from services import login_rate_limit
     login_rate_limit.set_redis(redis_client)
+    from services import ssh_kill
+    ssh_kill.set_redis(redis_client)
     log.info("Redis connected", extra={"redis_url": REDIS_URL, "payload_encryption": ENC_ENABLED})
 
     await init_db()
@@ -75,6 +78,12 @@ async def lifespan(app: FastAPI):
 
     from services.proxmox_iops_poller import run_iops_poller
     iops_task = asyncio.create_task(run_iops_poller())
+    from services.vps_metrics import run_vps_sampler
+    vps_task = asyncio.create_task(run_vps_sampler())
+    from services.lifecycle import run_lifecycle_job
+    lifecycle_task = asyncio.create_task(run_lifecycle_job())
+    from services.vm_batches import recover_interrupted
+    await recover_interrupted()     # VM massal yang terputus saat backend mati bisa dilanjutkan dari halaman
 
     yield
 
@@ -82,9 +91,13 @@ async def lifespan(app: FastAPI):
     poller_task.cancel()
     admin_pw_task.cancel()
     iops_task.cancel()
+    vps_task.cancel()
+    lifecycle_task.cancel()
     from services.ssh_client import close_all_pooled
     await close_all_pooled()   # tutup semua koneksi SSH pool (anti zombie)
     await redis_client.aclose()
+    from services import remote_history
+    await remote_history.close()
     await close_pool()
     log.info("Connections closed")
 
@@ -105,6 +118,8 @@ os.makedirs("static/uploads/requests", exist_ok=True)
 # on any path that contains "uploads", blocking browser MIME sniffing and JS execution.
 app.mount("/static", _SecureUploadsStaticFiles(directory="static"), name="static")
 
+# Bahasa pesan galat/validasi mengikuti header Accept-Language dari frontend (lihat i18n.py).
+app.add_middleware(LanguageMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost").split(",") if o.strip()],
@@ -125,9 +140,11 @@ app.include_router(infra_requests.router, prefix="/api/v1/infra-requests",    ta
 app.include_router(groups.router,         prefix="/api/v1/groups",             tags=["Groups"])
 app.include_router(guac.router,           prefix="/ws/guac",                   tags=["Guacamole WS"])
 app.include_router(proxmox.router,        prefix="/api/v1/proxmox",            tags=["Proxmox"])
-app.include_router(tailscale.router,       prefix="/api/v1/tailscale",           tags=["Tailscale"])
 app.include_router(openweb.router,         prefix="/api/v1/openweb",             tags=["Open Web"])
+app.include_router(system.router,          prefix="/api/v1/system",              tags=["System"])
 app.include_router(ssh_keys.router,        prefix="/api/v1/ssh-keys",            tags=["SSH Keys"])
+app.include_router(networks.router,        prefix="/api/v1/networks",            tags=["Networks"])
+app.include_router(vm_batches.router,      prefix="/api/v1/vm-batches",          tags=["VM Batches"])
 
 
 @app.get("/health")

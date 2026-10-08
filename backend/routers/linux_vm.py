@@ -19,13 +19,15 @@ from typing import Optional
 
 from auth import get_current_user, Role
 from routers.ssh_creds import get_vm_ssh_client
+from i18n import tr
 
 router = APIRouter()
 
 
 def _require_admin(user: dict):
     if user["role"] not in (Role.SUPERADMIN, Role.SYSADMIN):
-        raise HTTPException(403, "Aksi ini hanya untuk admin/sysadmin")
+        raise HTTPException(403, tr("Aksi ini hanya untuk admin/sysadmin",
+                                    "Only admins/sysadmins can do this"))
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -342,7 +344,7 @@ async def get_disk_info(
     client = await get_vm_ssh_client(vm_id, host_name)
     ok, err = await client.test_connection()
     if not ok:
-        raise HTTPException(503, f"SSH gagal: {err}")
+        raise HTTPException(503, tr(f"SSH gagal: {err}", f"SSH failed: {err}"))
 
     lsblk_out, _, _ = await client.exec("lsblk -J -o NAME,SIZE,FSTYPE,MOUNTPOINT,TYPE 2>/dev/null")
     df_out, _, _    = await client.exec("df -h 2>/dev/null")
@@ -376,7 +378,7 @@ async def get_network_info(
     client = await get_vm_ssh_client(vm_id, host_name)
     ok, err = await client.test_connection()
     if not ok:
-        raise HTTPException(503, f"SSH gagal: {err}")
+        raise HTTPException(503, tr(f"SSH gagal: {err}", f"SSH failed: {err}"))
 
     ip_out,   _, _ = await client.exec("ip -j addr show 2>/dev/null || ip addr show")
     route_out, _, _ = await client.exec("ip -j route show 2>/dev/null || ip route show")
@@ -446,4 +448,4 @@ def _validate_ip(ip: str):
     try:
         ipaddress.ip_address(ip)
     except ValueError:
-        raise HTTPException(400, f"IP address tidak valid: {ip}")
+        raise HTTPException(400, tr(f"IP address tidak valid: {ip}", f"Invalid IP address: {ip}"))

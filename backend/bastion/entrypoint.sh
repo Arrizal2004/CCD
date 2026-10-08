@@ -28,4 +28,7 @@ rm -f /dev/log
 i=0
 while [ ! -S /dev/log ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
 
+# Pemutus sesi atas perintah admin (berjalan sebagai root, lihat ccd-kill).
+/usr/local/bin/ccd-kill &
+
 exec /usr/sbin/sshd -D

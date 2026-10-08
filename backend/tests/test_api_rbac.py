@@ -28,6 +28,14 @@ def test_invalid_token_returns_401(client):
 def test_student_cannot_list_users(client, student_token):
     r = client.get("/api/v1/users", headers=_h(student_token))
     assert r.status_code == 403
+    # Pesan singkat untuk pengguna, tanpa membeberkan nama role internal.
+    assert r.json()["detail"] == "Forbidden: fitur ini khusus admin."
+
+
+def test_sysadmin_forbidden_on_superadmin_feature(client, sysadmin_token):
+    r = client.post("/api/v1/users/bulk", headers=_h(sysadmin_token), json={"user_ids": [1], "action": "activate"})
+    assert r.status_code == 403
+    assert r.json()["detail"] == "Forbidden: fitur ini khusus superadmin."
 
 
 def test_sysadmin_can_list_users(client, sysadmin_token):

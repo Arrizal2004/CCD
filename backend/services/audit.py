@@ -6,7 +6,7 @@ boleh mengganggu endpoint inti. Panggil di dalam router (auth, VM control,
 credential, RBAC) untuk merekam event.
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from database import get_pool
@@ -28,13 +28,13 @@ def _parse_dt(s: str) -> Optional[datetime]:
 
 
 def _client_ip(request) -> str:
+    """IP klien dari X-Real-IP, yang selalu ditimpa nginx dengan $remote_addr (IP asli, termasuk di
+    belakang Cloudflare lewat modul realip). X-Forwarded-For tidak dipakai: entri pertamanya bisa
+    diisi sendiri oleh klien."""
     if request is None:
         return ""
     try:
-        xff = request.headers.get("x-forwarded-for")
-        if xff:
-            return xff.split(",")[0].strip()
-        return request.client.host if request.client else ""
+        return request.headers.get("x-real-ip") or (request.client.host if request.client else "")
     except Exception:
         return ""
 
@@ -90,8 +90,10 @@ async def query_logs(
     limit: int = 50, offset: int = 0,
     search: str = "", severity: str = "",
     start: Optional[str] = None, end: Optional[str] = None,
+    action: str = "", username: str = "",
 ) -> dict:
-    """Ambil audit logs dengan pagination + filter. Return {total, items}."""
+    """Ambil audit logs dengan pagination + filter. Return {total, items}.
+    action: satu action_type persis; username: satu akun persis (tanpa beda huruf besar/kecil)."""
     where = []
     params = []
     i = 1
@@ -100,6 +102,10 @@ async def query_logs(
         params.append(f"%{search}%"); i += 1
     if severity in SEVERITIES:
         where.append(f"severity_level = ${i}"); params.append(severity); i += 1
+    if action:
+        where.append(f"action_type = ${i}"); params.append(action); i += 1
+    if username:
+        where.append(f"lower(username) = lower(${i})"); params.append(username); i += 1
     start_dt = _parse_dt(start) if start else None
     end_dt   = _parse_dt(end)   if end   else None
     if start_dt:
@@ -139,3 +145,45 @@ async def query_logs(
             for r in rows
         ],
     }
+
+
+async def action_types() -> list[str]:
+    """Jenis aksi yang pernah tercatat, untuk pilihan filter di Activity Log."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT DISTINCT action_type FROM audit_logs ORDER BY action_type")
+    return [r["action_type"] for r in rows]
+
+
+async def failed_logins(days: int, limit: int = 50) -> dict:
+    """Rekap AUTH_LOGIN_FAILED dalam `days` hari terakhir, per akun dan per IP, supaya tebak-tebakan
+    password terlihat tanpa harus membaca Activity Log baris demi baris."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        total = await conn.fetchval(
+            "SELECT count(*) FROM audit_logs WHERE action_type = 'AUTH_LOGIN_FAILED' AND created_at >= $1", since)
+        by_user = await conn.fetch(
+            """SELECT a.username, count(*) AS attempts, max(a.created_at) AS last_at,
+                      array_agg(DISTINCT a.client_ip) FILTER (WHERE a.client_ip <> '') AS ips,
+                      bool_or(u.id IS NOT NULL) AS known
+               FROM audit_logs a
+               LEFT JOIN users u ON u.username = a.username AND u.deleted_at IS NULL
+               WHERE a.action_type = 'AUTH_LOGIN_FAILED' AND a.created_at >= $1
+               GROUP BY a.username ORDER BY attempts DESC, last_at DESC LIMIT $2""", since, limit)
+        by_ip = await conn.fetch(
+            """SELECT client_ip AS ip, count(*) AS attempts, max(created_at) AS last_at,
+                      count(DISTINCT username) AS accounts,
+                      (array_agg(DISTINCT username))[1:10] AS usernames
+               FROM audit_logs
+               WHERE action_type = 'AUTH_LOGIN_FAILED' AND created_at >= $1 AND client_ip <> ''
+               GROUP BY client_ip ORDER BY attempts DESC, last_at DESC LIMIT $2""", since, limit)
+    from services.login_rate_limit import seconds_locked
+    users = []
+    for r in by_user:
+        users.append({"username": r["username"], "attempts": r["attempts"], "last_at": r["last_at"].isoformat(),
+                      "ips": sorted(r["ips"] or []), "known": bool(r["known"]),
+                      "locked_for": await seconds_locked(r["username"] or "")})
+    ips = [{"ip": r["ip"], "attempts": r["attempts"], "last_at": r["last_at"].isoformat(),
+            "accounts": r["accounts"], "usernames": sorted(r["usernames"] or [])} for r in by_ip]
+    return {"days": days, "total": total or 0, "by_user": users, "by_ip": ips}

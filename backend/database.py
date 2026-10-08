@@ -302,6 +302,40 @@ async def init_db():
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_user_ssh_keys_user ON user_ssh_keys (user_id)")
 
+        # Pengaturan sistem yang diubah superadmin dari dashboard (services/system_settings.py).
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS system_settings (
+                id         INTEGER PRIMARY KEY CHECK (id = 1),
+                data       JSONB NOT NULL DEFAULT '{}',
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_by TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        # Logo institusi (PNG/JPEG/WebP, maks 512 KB) di database supaya ikut backup.
+        await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS logo BYTEA")
+        await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS logo_type TEXT")
+        await conn.execute("ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS logo_updated_at TIMESTAMPTZ")
+
+        # Resource VPS dashboard per menit (services/vps_metrics.py), disimpan 30 hari.
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS vps_metrics (
+                recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                cpu_pct     REAL,
+                cpu_max     REAL,
+                iowait_pct  REAL,
+                mem_used    BIGINT,
+                mem_max     BIGINT,
+                mem_total   BIGINT,
+                swap_used   BIGINT,
+                load1       REAL,
+                disk_used   BIGINT,
+                disk_total  BIGINT,
+                net_rx_bps  REAL,
+                net_tx_bps  REAL
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_vps_metrics_time ON vps_metrics (recorded_at)")
+
         # Sesi SSH lewat bastion, disusun dari log sshd (services/ssh_audit.py). Tanpa FK ke users
         # supaya riwayat tetap ada walaupun akunnya dihapus.
         await conn.execute("""
@@ -689,6 +723,8 @@ async def cleanup_old_metrics():
         await conn.execute(
             "DELETE FROM vm_iops_history WHERE recorded_at < $1", cutoff
         )
+        # Resource VPS punya retensi sendiri (30 hari), lebih panjang dari metrik VM.
+        await conn.execute("DELETE FROM vps_metrics WHERE recorded_at < NOW() - INTERVAL '30 days'")
 
     log.info("Cleanup done", extra={"vm_rows": vm_deleted, "host_rows": host_deleted, "retention_days": RETENTION_DAYS})
     return vm_deleted, host_deleted
@@ -711,7 +747,16 @@ async def purge_old_audit_logs() -> int:
         await conn.execute("DELETE FROM openweb_sessions WHERE created_at < $1", cutoff)
         await conn.execute("DELETE FROM ssh_sessions WHERE started_at < $1", cutoff)
 
-    log.info("Audit log cleanup done", extra={"rows": deleted, "retention_days": AUDIT_RETENTION_DAYS})
+    # Riwayat sesi Remote ada di database Guacamole; retensinya disamakan dengan Activity Log.
+    from services import remote_history
+    try:
+        remote = await remote_history.purge(cutoff)
+    except Exception as e:
+        log.warning("Remote history cleanup failed: %s", e)
+        remote = 0
+
+    log.info("Audit log cleanup done", extra={"rows": deleted, "remote_rows": remote,
+                                              "retention_days": AUDIT_RETENTION_DAYS})
     return deleted or 0
 
 

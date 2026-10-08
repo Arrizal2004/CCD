@@ -9,6 +9,7 @@ import logging
 from database import get_pool
 from services.ssh_client import encrypt_secret, decrypt_secret
 from services.proxmox_client import ProxmoxClient
+from i18n import tr
 
 log = logging.getLogger("proxmox_instances")
 
@@ -98,7 +99,8 @@ async def get_client(label: str) -> ProxmoxClient:
             label,
         )
     if not row:
-        raise ValueError(f"Proxmox instance '{label}' tidak ditemukan")
+        raise ValueError(tr(f"Proxmox instance '{label}' tidak ditemukan",
+                            f"Proxmox instance '{label}' not found"))
 
     client = ProxmoxClient(
         host=row["host"],
