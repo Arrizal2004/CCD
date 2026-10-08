@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { currentLang } from './i18n';
 
 const BASE = import.meta.env.VITE_API_URL || '';
 
@@ -16,6 +17,12 @@ const attachToken = config => {
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
 };
+// Bahasa pilihan pengguna: backend memakainya untuk pesan galat dan validasi.
+const attachLanguage = config => {
+    config.headers['Accept-Language'] = currentLang();
+    return config;
+};
+for (const instance of [api, apiAgent, apiLong, axios]) instance.interceptors.request.use(attachLanguage);
 api.interceptors.request.use(attachToken);
 apiAgent.interceptors.request.use(attachToken);
 apiLong.interceptors.request.use(attachToken);
@@ -29,6 +36,11 @@ export const resetSessionExpired = () => { sessionExpiredFired = false; };
 
 const handleAuthError = error => {
     const status = error?.response?.status;
+    // Password direset admin: hanya ganti password yang boleh dilakukan. App menampilkan layarnya.
+    if (status === 403 && error?.response?.headers?.['x-password-change-required']) {
+        window.dispatchEvent(new CustomEvent('hv:must-change-password'));
+        return Promise.reject(error);
+    }
     const detail = error?.response?.data?.detail || '';
     const expired = status === 401 || /expired|invalid.*token|not authenticated/i.test(detail);
     if (expired && !sessionExpiredFired) {
@@ -93,8 +105,27 @@ export const fetchSshKeys   = () => api.get('/api/v1/ssh-keys').then(r => r.data
 export const addSshKey      = (body) => api.post('/api/v1/ssh-keys', body).then(r => r.data);
 export const deleteSshKey   = (id) => api.delete(`/api/v1/ssh-keys/${id}`).then(r => r.data);
 export const fetchAllProxmoxVms = () => api.get('/api/v1/proxmox/all-vms').then(r => r.data);
+/** Simpan sesi login: token dashboard dan (kalau ada) token Guacamole untuk Connect. */
+export const storeSession = (token, guacAuth) => {
+    localStorage.setItem('hv_token', token);
+    axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    if (guacAuth?.authToken) {
+        const old = localStorage.getItem('hv_guac_token');
+        if (old && old !== guacAuth.authToken) {
+            fetch(`/guacamole/api/tokens/${encodeURIComponent(old)}`, { method: 'DELETE' }).catch(() => null);
+        }
+        localStorage.setItem('hv_guac_token', guacAuth.authToken);
+        // Format GUAC_AUTH: localStorageService.setItem(key, authResultObj)
+        // yang di-JSON.stringify langsung — bukan dibungkus { [dataSource]: ... }
+        localStorage.setItem('GUAC_AUTH', JSON.stringify(guacAuth));
+    }
+};
+// Mengganti password mengakhiri semua sesi lain; sesi ini memakai token baru dari respons.
 export const changePassword = (old_password, new_password) =>
-    api.post('/api/v1/users/me/change-password', { old_password, new_password }).then(r => r.data);
+    api.post('/api/v1/users/me/change-password', { old_password, new_password }).then(r => {
+        if (r.data.access_token) storeSession(r.data.access_token, r.data.guac_auth);
+        return r.data;
+    });
 export const fetchHealthz = () => api.get('/healthz').then(r => r.data).catch(() => ({ status: 'error', checks: {} }));
 
 
@@ -103,17 +134,28 @@ export const fetchUsers    = ()          => api.get('/api/v1/users').then(r => r
 export const createUser    = (body)      => api.post('/api/v1/users', body).then(r => r.data);
 export const updateUser    = (id, body)  => api.put(`/api/v1/users/${id}`, body).then(r => r.data);
 export const deleteUserApi = (id)        => api.delete(`/api/v1/users/${id}`).then(r => r.data);
+export const resetUserPassword = (id)    => api.post(`/api/v1/users/${id}/reset-password`).then(r => r.data);
+export const fetchPasswordHelp = ()      => api.get('/api/v1/users/password-help').then(r => r.data);
+export const dismissPasswordHelp = (id)  => api.post(`/api/v1/users/password-help/${id}/dismiss`).then(r => r.data);
+// Publik (halaman login): jawabannya selalu sama, terdaftar atau tidak.
+export const requestPasswordHelp = (username, message) =>
+    axios.post(`${BASE}/api/v1/users/password-help`, { username, message }).then(r => r.data);
 export const fetchUserAssignments = (user_id) => api.get(`/api/v1/users/${user_id}/vm-assignments`).then(r => r.data);
 export const assignVm = (user_id, vm_id, host_name, os_account_id = null, vm_name = null) =>
     api.post('/api/v1/users/vm-assignments', { user_id, vm_id, host_name, vm_name, os_account_id }).then(r => r.data);
 export const fetchVmOsAccounts = (host_name, vm_id) =>
     api.get(`/api/v1/ssh-creds/vm-os-accounts/${host_name}/${encodeURIComponent(vm_id)}`).then(r => r.data);
+// create_in_vm / remove_in_vm menjalankan perintah lewat QEMU Guest Agent, jadi pakai timeout agent.
 export const upsertVmOsAccount = (host_name, vm_id, data) =>
-    api.post(`/api/v1/ssh-creds/vm-os-accounts/${host_name}/${encodeURIComponent(vm_id)}`, data).then(r => r.data);
+    apiAgent.post(`/api/v1/ssh-creds/vm-os-accounts/${host_name}/${encodeURIComponent(vm_id)}`, data).then(r => r.data);
 export const updateVmOsAccount = (host_name, vm_id, account_id, data) =>
     api.put(`/api/v1/ssh-creds/vm-os-accounts/${host_name}/${encodeURIComponent(vm_id)}/${account_id}`, data).then(r => r.data);
-export const deleteVmOsAccount = (host_name, vm_id, account_id) =>
-    api.delete(`/api/v1/ssh-creds/vm-os-accounts/${host_name}/${encodeURIComponent(vm_id)}/${account_id}`).then(r => r.data);
+export const deleteVmOsAccount = (host_name, vm_id, account_id, removeInVm = false) =>
+    apiAgent.delete(`/api/v1/ssh-creds/vm-os-accounts/${host_name}/${encodeURIComponent(vm_id)}/${account_id}`,
+        { params: removeInVm ? { remove_in_vm: true } : {} }).then(r => r.data);
+// Ganti password user di dalam VM lewat QEMU Guest Agent. Body kosong = user Login Connect, password acak.
+export const resetVmPassword = (host_name, vm_id, body = {}) =>
+    apiAgent.post(`/api/v1/ssh-creds/vm/${host_name}/${encodeURIComponent(vm_id)}/reset-password`, body).then(r => r.data);
 export const removeAssignment = (user_id, vm_id) =>
     api.delete(`/api/v1/users/${user_id}/vm-assignments/${vm_id}`).then(r => r.data);
 
@@ -214,10 +256,26 @@ export const fetchAuditLogs = (params = {}) =>
     api.get('/api/admin/audit-logs', { params }).then(r => r.data).catch(() => ({ total: 0, items: [] }));
 export const fetchRemoteSessions = () =>
     api.get('/api/admin/remote/sessions').then(r => r.data).catch(() => ({ sessions: [] }));
-export const killRemoteSession = (active_id) =>
-    api.post('/api/admin/remote/kill-session', { active_id }).then(r => r.data);
-export const fetchRemoteHistory = (page = 1, page_size = 50) =>
-    api.get('/api/admin/remote/history', { params: { page, page_size } }).then(r => r.data).catch(() => ({ total: 0, items: [] }));
+// block: 'none' | 'account' (nonaktifkan akun & putus semua sesinya) | 'vm' (cabut penugasan VM itu)
+export const killRemoteSession = (active_id, block = 'none') =>
+    api.post('/api/admin/remote/kill-session', { active_id, block }).then(r => r.data);
+export const fetchRemoteHistory = (page = 1, page_size = 50, filters = {}) =>
+    api.get('/api/admin/remote/history', { params: { page, page_size, ...filters } }).then(r => r.data).catch(() => ({ total: 0, items: [] }));
+export const fetchAuditActions = () =>
+    api.get('/api/admin/audit-logs/actions').then(r => r.data.actions).catch(() => []);
+export const fetchFailedLogins = (days = 7) =>
+    api.get('/api/admin/audit-logs/failed-logins', { params: { days } }).then(r => r.data);
+// Ekspor CSV (Activity Log / riwayat Remote, Web, SSH) sesuai filter; browser langsung mengunduh berkasnya.
+export const downloadAdminCsv = async (path, params = {}) => {
+    const r = await apiLong.get(`/api/admin/${path}`, { params, responseType: 'blob' });
+    const name = /filename="([^"]+)"/.exec(r.headers?.['content-disposition'] || '')?.[1] || 'ccd-export.csv';
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return name;
+};
 export const guacGrantAdmins = () =>
     api.post('/api/admin/guac-grant-admins').then(r => r.data);
 
@@ -305,7 +363,7 @@ export const fetchInfraMessages = (reqId) =>
 // WebSocket URL for realtime infra request chat
 export const infraRequestWsUrl = (reqId) => {
     const tok = localStorage.getItem('hv_token') || '';
-    return `${WS_BASE}/api/v1/infra-requests/${reqId}/ws?token=${encodeURIComponent(tok)}`;
+    return `${WS_BASE}/api/v1/infra-requests/${reqId}/ws?token=${encodeURIComponent(tok)}&lang=${currentLang()}`;
 };
 
 // ── Groups (ReBAC) ────────────────────────────────────────────────────────────
@@ -319,8 +377,8 @@ export const addGroupMember    = (id, user_id)   => api.post(`/api/v1/groups/${i
 export const removeGroupMember = (id, user_id)   => api.delete(`/api/v1/groups/${id}/members/${user_id}`);
 
 export const fetchGroupVms     = (id)            => api.get(`/api/v1/groups/${id}/vms`).then(r => r.data);
-export const addGroupVm        = (id, body)      => api.post(`/api/v1/groups/${id}/vms`, body).then(r => r.data);
-export const updateGroupVm     = (id, body)      => api.put(`/api/v1/groups/${id}/vms`, body).then(r => r.data);
+export const addGroupVm        = (id, body)      => apiAgent.post(`/api/v1/groups/${id}/vms`, body).then(r => r.data);
+export const updateGroupVm     = (id, body)      => apiAgent.put(`/api/v1/groups/${id}/vms`, body).then(r => r.data);
 export const removeGroupVm     = (id, vm_id, host_name) => api.delete(`/api/v1/groups/${id}/vms`, { data: { vm_id, host_name } });
 
 export const fetchMyGroups     = ()              => api.get('/api/v1/groups/my').then(r => r.data).catch(() => []);
@@ -385,30 +443,62 @@ export const fetchAllProxmoxVmsFlat = async () => {
     return results;
 };
 
-// ── Tailscale ─────────────────────────────────────────────────────────────────
-export const fetchTailscaleDevices = () => api.get('/api/v1/tailscale/devices').then(r => r.data).catch(() => []);
-export const fetchTailscaleAcl = () => api.get('/api/v1/tailscale/acl').then(r => r.data);
-export const fetchTailscaleConfig  = () => api.get('/api/v1/tailscale/config').then(r => r.data);
-export const saveTailscaleConfig   = (body) => api.put('/api/v1/tailscale/config', body).then(r => r.data);
-export const deleteTailscaleConfig = () => api.delete('/api/v1/tailscale/config').then(r => r.data);
-export const fetchTailscalePolicy   = () => api.get('/api/v1/tailscale/policy').then(r => r.data);
-export const previewTailscalePolicy = (body) => api.post('/api/v1/tailscale/policy/preview', body).then(r => r.data);
-export const applyTailscalePolicy   = (body) => api.post('/api/v1/tailscale/policy/apply', body).then(r => r.data);
-export const setTailscaleGateway    = (deviceId, enabled) =>
-    api.put(`/api/v1/tailscale/devices/${encodeURIComponent(deviceId)}/gateway`, { enabled }).then(r => r.data);
-export const setAdminTailscaleLogin = (userId, tailscale_login) =>
-    api.put(`/api/v1/tailscale/admin-logins/${userId}`, { tailscale_login }).then(r => r.data);
 export const createOpenWebTicket = (url) => api.post('/api/v1/openweb/ticket', { url }).then(r => r.data);
 export const fetchProxmoxVmResources = (instance, node, vmid) => api.get(`${pveBase(instance, node)}/vms/${vmid}/resources`).then(r => r.data);
 export const updateProxmoxVmResources = (instance, node, vmid, body) => apiLong.put(`${pveBase(instance, node)}/vms/${vmid}/resources`, body).then(r => r.data);
 export const fetchMyProxmoxVms = () => api.get('/api/v1/proxmox/my-vms').then(r => r.data);
 export const fetchOpenWebSessions = () =>
     api.get('/api/admin/openweb/sessions').then(r => r.data).catch(() => ({ sessions: [] }));
-export const fetchOpenWebHistory = (page = 1, page_size = 50) =>
-    api.get('/api/admin/openweb/history', { params: { page, page_size } }).then(r => r.data).catch(() => ({ total: 0, items: [] }));
-export const killOpenWebSession = (session_id) =>
-    api.post('/api/admin/openweb/kill', { session_id }).then(r => r.data);
+export const fetchOpenWebHistory = (page = 1, page_size = 50, filters = {}) =>
+    api.get('/api/admin/openweb/history', { params: { page, page_size, ...filters } }).then(r => r.data).catch(() => ({ total: 0, items: [] }));
+export const killOpenWebSession = (session_id, block = 'none') =>
+    api.post('/api/admin/openweb/kill', { session_id, block }).then(r => r.data);
 export const fetchSshSessions = () =>
     api.get('/api/admin/ssh/sessions').then(r => r.data).catch(() => ({ sessions: [] }));
-export const fetchSshHistory = (page = 1, page_size = 50) =>
-    api.get('/api/admin/ssh/history', { params: { page, page_size } }).then(r => r.data).catch(() => ({ total: 0, items: [] }));
+export const fetchSshHistory = (page = 1, page_size = 50, filters = {}) =>
+    api.get('/api/admin/ssh/history', { params: { page, page_size, ...filters } }).then(r => r.data).catch(() => ({ total: 0, items: [] }));
+// Menunggu konfirmasi bastion sampai ~8 detik, jadi memakai apiLong.
+export const killSshSession = (session_id, block = 'none') =>
+    apiLong.post('/api/admin/ssh/kill', { session_id, block }).then(r => r.data);
+export const fetchVpsLive = () => api.get('/api/admin/vps/live').then(r => r.data);
+export const fetchVpsHistory = (range) => api.get('/api/admin/vps/history', { params: { range } }).then(r => r.data);
+
+// ── Pengaturan Sistem (identitas dan aturan pendaftaran) ─────────────────────
+export const fetchBranding = () => api.get('/api/v1/system/branding').then(r => r.data);
+export const fetchSystemConfig = () => api.get('/api/v1/system/config').then(r => r.data);
+export const uploadSystemLogo = (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    return apiUpload.post('/api/v1/system/logo', form).then(r => r.data);
+};
+export const deleteSystemLogo = () => api.delete('/api/v1/system/logo').then(r => r.data);
+export const fetchSystemSettings = () => api.get('/api/v1/system/settings').then(r => r.data);
+export const saveSystemSettings = (body) => api.put('/api/v1/system/settings', body).then(r => r.data);
+
+// ── Siklus akun dan masa sewa VM ─────────────────────────────────────────────
+export const bulkUsers = (body) => api.post('/api/v1/users/bulk', body).then(r => r.data);
+export const importUsers = (rows, dry_run) => api.post('/api/v1/users/import', { rows, dry_run }).then(r => r.data);
+export const setVmLease = (instance, node, vmid, body) =>
+    api.put(`${pveBase(instance, node)}/vms/${vmid}/lease`, body).then(r => r.data);
+
+// Switch (jaringan) CCD: blok alamat per Proxmox dan switch terisolasi di dalamnya.
+// Membuat, mengubah, dan menghapus switch menerapkan SDN di Proxmox (memuat ulang jaringan host), jadi pakai timeout panjang.
+const netBase = '/api/v1/networks';
+export const fetchNetworks      = ()            => api.get(netBase).then(r => r.data);
+export const checkNetworkSetup  = (label)       => apiAgent.get(`${netBase}/instances/${encodeURIComponent(label)}/check`).then(r => r.data);
+export const addNetworkPool     = (label, cidr) => apiAgent.post(`${netBase}/instances/${encodeURIComponent(label)}/pools`, { cidr }).then(r => r.data);
+export const removeNetworkPool  = (label, cidr) => apiAgent.delete(`${netBase}/instances/${encodeURIComponent(label)}/pools`, { params: { cidr } }).then(r => r.data);
+export const createNetwork      = (body)        => apiLong.post(netBase, body).then(r => r.data);
+export const updateNetwork      = (id, body)    => apiLong.patch(`${netBase}/${id}`, body).then(r => r.data);
+export const deleteNetwork      = (id)          => apiLong.delete(`${netBase}/${id}`).then(r => r.data);
+export const fetchNetworkVms    = (id)          => apiAgent.get(`${netBase}/${id}/vms`).then(r => r.data);
+export const fetchNetworkFreeIp = (id)          => apiAgent.get(`${netBase}/${id}/free-ip`).then(r => r.data);
+
+// VM massal per kelas: rencana, mulai (berjalan di latar belakang), progres, ulangi, dan CSV kredensial.
+const batchBase = '/api/v1/vm-batches';
+export const previewVmBatch     = (body) => apiAgent.post(`${batchBase}/preview`, body).then(r => r.data);
+export const createVmBatch      = (body) => apiAgent.post(batchBase, body).then(r => r.data);
+export const fetchVmBatches     = ()     => api.get(batchBase).then(r => r.data);
+export const fetchVmBatch       = (id)   => api.get(`${batchBase}/${id}`).then(r => r.data);
+export const retryVmBatch       = (id)   => apiAgent.post(`${batchBase}/${id}/retry`).then(r => r.data);
+export const downloadVmBatchCsv = (id)   => api.get(`${batchBase}/${id}/credentials.csv`, { responseType: 'blob' }).then(r => r.data);

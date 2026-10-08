@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { changePassword, fetchSshConfig } from '../api';
 import SshKeysSection from './SshKeysSection';
+import { useT } from '../i18n';
 
 const ROLE_COLOR = {
     superadmin: 'var(--red)',
@@ -11,6 +12,7 @@ const ROLE_COLOR = {
 };
 
 function Field({ label, type = 'text', value, onChange, placeholder }) {
+    const t = useT();
     const [show, setShow] = useState(false);
     const isPassword = type === 'password';
     return (
@@ -43,6 +45,7 @@ function Field({ label, type = 'text', value, onChange, placeholder }) {
                             color: 'var(--text3)', fontSize: 14, padding: 0,
                         }}
                         tabIndex={-1}
+                        aria-label={t('profile.showPassword')}
                     >
                         {show ? '🙈' : '👁'}
                     </button>
@@ -53,6 +56,7 @@ function Field({ label, type = 'text', value, onChange, placeholder }) {
 }
 
 export default function ProfileModal({ user, onClose }) {
+    const t = useT();
     const [oldPw,  setOldPw]  = useState('');
     const [newPw,  setNewPw]  = useState('');
     const [confPw, setConfPw] = useState('');
@@ -65,18 +69,18 @@ export default function ProfileModal({ user, onClose }) {
         e.preventDefault();
         setStatus(null);
 
-        if (!oldPw)  return setStatus({ type: 'error', msg: 'Password lama wajib diisi' });
-        if (newPw.length < 8) return setStatus({ type: 'error', msg: 'Password baru minimal 8 karakter' });
-        if (newPw !== confPw) return setStatus({ type: 'error', msg: 'Konfirmasi password tidak cocok' });
-        if (oldPw === newPw)  return setStatus({ type: 'error', msg: 'Password baru tidak boleh sama dengan password lama' });
+        if (!oldPw)  return setStatus({ type: 'error', msg: t('profile.errOld') });
+        if (newPw.length < 8) return setStatus({ type: 'error', msg: t('profile.errShort') });
+        if (newPw !== confPw) return setStatus({ type: 'error', msg: t('profile.errMismatch') });
+        if (oldPw === newPw)  return setStatus({ type: 'error', msg: t('profile.errSame') });
 
         setLoading(true);
         try {
             await changePassword(oldPw, newPw);
-            setStatus({ type: 'success', msg: 'Password berhasil diubah!' });
+            setStatus({ type: 'success', msg: t('profile.saved') });
             setOldPw(''); setNewPw(''); setConfPw('');
         } catch (err) {
-            const msg = err?.response?.data?.detail || err.message || 'Gagal mengganti password';
+            const msg = err?.response?.data?.detail || err.message || t('profile.failed');
             setStatus({ type: 'error', msg });
         } finally {
             setLoading(false);
@@ -106,8 +110,8 @@ export default function ProfileModal({ user, onClose }) {
             >
                 {/* Header */}
                 <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text1)' }}>Profil Saya</div>
-                    <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 18, lineHeight: 1 }}>✕</button>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text1)' }}>{t('profile.title')}</div>
+                    <button onClick={onClose} aria-label={t('common.close')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 18, lineHeight: 1 }}>✕</button>
                 </div>
 
                 {/* User info strip */}
@@ -134,7 +138,7 @@ export default function ProfileModal({ user, onClose }) {
                                 color: ROLE_COLOR[user?.role] || 'var(--text3)',
                                 textTransform: 'uppercase', letterSpacing: '0.06em',
                             }}>
-                                {user?.role}
+                                {t(`role.${user?.role}`)}
                             </span>
                         </div>
                     </div>
@@ -143,12 +147,12 @@ export default function ProfileModal({ user, onClose }) {
                 {/* Change password form */}
                 <form onSubmit={handleSubmit} style={{ padding: '18px 20px 20px' }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 14, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                        Ganti Password
+                        {t('profile.changePassword')}
                     </div>
 
-                    <Field label="Password Lama" type="password" value={oldPw} onChange={setOldPw} placeholder="Masukkan password saat ini" />
-                    <Field label="Password Baru" type="password" value={newPw} onChange={setNewPw} placeholder="Minimal 6 karakter" />
-                    <Field label="Konfirmasi Password Baru" type="password" value={confPw} onChange={setConfPw} placeholder="Ulangi password baru" />
+                    <Field label={t('profile.oldPassword')} type="password" value={oldPw} onChange={setOldPw} placeholder={t('profile.oldPasswordPh')} />
+                    <Field label={t('profile.newPassword')} type="password" value={newPw} onChange={setNewPw} placeholder={t('profile.newPasswordPh')} />
+                    <Field label={t('profile.confirm')} type="password" value={confPw} onChange={setConfPw} placeholder={t('profile.confirmPh')} />
 
                     {/* Strength indicator */}
                     {newPw.length > 0 && (
@@ -167,7 +171,7 @@ export default function ProfileModal({ user, onClose }) {
                                 })}
                             </div>
                             <div style={{ fontSize: 10, color: 'var(--text3)' }}>
-                                {newPw.length < 8 ? 'Lemah' : newPw.length < 10 ? 'Cukup' : newPw.length < 12 ? 'Kuat' : 'Sangat Kuat'}
+                                {t(newPw.length < 8 ? 'profile.weak' : newPw.length < 10 ? 'profile.fair' : newPw.length < 12 ? 'profile.strong' : 'profile.veryStrong')}
                             </div>
                         </div>
                     )}
@@ -194,7 +198,7 @@ export default function ProfileModal({ user, onClose }) {
                             fontSize: 13, fontWeight: 600,
                         }}
                     >
-                        {loading ? 'Menyimpan…' : 'Simpan Password Baru'}
+                        {loading ? t('common.saving') : t('profile.save')}
                     </button>
                 </form>
 

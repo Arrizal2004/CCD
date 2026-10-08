@@ -1,17 +1,24 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchUsers, fetchUserAssignments, assignVm, removeAssignment, fetchVmOsAccounts, upsertVmOsAccount } from '../api';
+import { NewPasswordNotice } from './VmOsAccountsPanel';
+import { tNodes, useT } from '../i18n';
 
 // Assign VM ke user student, opsional dengan OS account (username/password) khusus per-student
 // untuk connect Guacamole mandiri. Reuse infra ssh_creds/vm_assignments generik yang sudah ada
 // (dibangun untuk Hyper-V, bekerja sama untuk Proxmox karena kunci vm_id/host_name generik).
+// "Tambah Baru" bisa sekaligus membuat user-nya di dalam VM lewat QEMU Guest Agent.
+const EMPTY_QUICK = { os_username: '', password: '', create_in_vm: true };
+
 export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
+    const t = useT();
     const vmIdStr = String(vmid);
     const [students, setStudents] = useState([]);
     const [assignments, setAssignments] = useState({}); // {student_id: {os_account_id, os_username} | null}
     const [osAccounts, setOsAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [pickingFor, setPickingFor] = useState(null);
-    const [quickForm, setQuickForm] = useState({ os_username: '', password: '' });
+    const [quickForm, setQuickForm] = useState(EMPTY_QUICK);
+    const [notice, setNotice] = useState(null);
     const [quickSaving, setQuickSaving] = useState(false);
     const [quickErr, setQuickErr] = useState('');
     const [quickOpen, setQuickOpen] = useState(false);
@@ -50,18 +57,19 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
             const acc = osAccounts.find(a => a.id === osAccountId);
             setAssignments(p => ({ ...p, [student.id]: { os_account_id: osAccountId, os_username: acc?.os_username || null } }));
         } catch (e) {
-            alert('Gagal assign: ' + (e?.response?.data?.detail || e.message));
+            alert(t('asg.assignFailed', { msg: e?.response?.data?.detail || e.message }));
         }
     };
 
     const doQuickAddAndAssign = async (student) => {
-        if (!quickForm.os_username.trim()) return setQuickErr('OS Username wajib diisi');
-        if (!quickForm.password) return setQuickErr('Password wajib diisi');
-        setQuickSaving(true); setQuickErr('');
+        if (!quickForm.os_username.trim()) return setQuickErr(t('asg.osUserRequired'));
+        if (!quickForm.password && !quickForm.create_in_vm) return setQuickErr(t('asg.passwordRequired'));
+        setQuickSaving(true); setQuickErr(''); setNotice(null);
         try {
-            const res = await upsertVmOsAccount(hostName, vmIdStr, quickForm);
+            const res = await upsertVmOsAccount(hostName, vmIdStr, { ...quickForm, os_username: quickForm.os_username.trim(), password: quickForm.password || null });
             const newAcc = { id: res.id, os_username: res.os_username };
             setOsAccounts(p => [...p, newAcc]);
+            if (res.password) setNotice({ username: res.os_username, password: res.password });
             await doAssign(student, res.id);
             setQuickOpen(false);
         } catch (e) {
@@ -77,20 +85,22 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
                 await removeAssignment(student.id, vmIdStr);
                 setAssignments(p => ({ ...p, [student.id]: null }));
             } catch (e) {
-                alert('Gagal hapus assign: ' + (e?.response?.data?.detail || e.message));
+                alert(t('asg.unassignFailed', { msg: e?.response?.data?.detail || e.message }));
             }
         } else {
-            setQuickForm({ os_username: '', password: '' });
+            setQuickForm(EMPTY_QUICK);
             setQuickErr('');
             setQuickOpen(false);
             setPickingFor(student.id);
         }
     };
 
-    if (loading) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>Loading…</div>;
-    if (students.length === 0) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>Tidak ada user dengan role student.</div>;
+    if (loading) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('common.loading')}</div>;
+    if (students.length === 0) return <div style={{ padding: 20, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('asg.noStudents')}</div>;
 
     return (
+        <>
+        {notice && <NewPasswordNotice {...notice} onClose={() => setNotice(null)} />}
         <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
             {students.map(s => {
                 const asgn = assignments[s.id];
@@ -107,7 +117,7 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
                                             {asgn.os_username}
                                         </span>
                                     )}
-                                    {asgn && !asgn.os_username && <span style={{ fontSize: 10, color: 'var(--text3)' }}>default cred</span>}
+                                    {asgn && !asgn.os_username && <span style={{ fontSize: 10, color: 'var(--text3)' }}>{t('asg.defaultCred')}</span>}
                                 </div>
                             </div>
                             <button onClick={() => toggleAssign(s)}
@@ -117,17 +127,17 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
                                     color: asgn ? 'var(--red)' : 'var(--green)',
                                     border: `1px solid ${asgn ? 'var(--red)' : 'var(--green)'}`,
                                 }}>
-                                {asgn ? 'Hapus' : 'Assign'}
+                                {asgn ? t('asg.remove') : t('asg.assign')}
                             </button>
                         </div>
 
                         {isPicking && (
                             <div style={{ padding: '8px 14px 12px', background: 'var(--bg-card)', borderTop: '1px solid var(--border)' }}>
-                                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 6 }}>Assign ke <b>{s.username}</b>:</div>
+                                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 6 }}>{tNodes('asg.assignTo', { name: <b>{s.username}</b> })}</div>
                                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: quickOpen ? 8 : 0 }}>
                                     <button onClick={() => doAssign(s, null)}
                                         style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'var(--bg-hover)', color: 'var(--text2)', border: '1px solid var(--border)' }}>
-                                        Default Cred
+                                        {t('asg.defaultCredBtn')}
                                     </button>
                                     {osAccounts.map(acc => (
                                         <button key={acc.id} onClick={() => doAssign(s, acc.id)}
@@ -135,35 +145,39 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
                                             {acc.os_username}
                                         </button>
                                     ))}
-                                    <button onClick={() => { setQuickOpen(o => !o); setQuickForm({ os_username: '', password: '' }); setQuickErr(''); }}
+                                    <button onClick={() => { setQuickOpen(o => !o); setQuickForm(EMPTY_QUICK); setQuickErr(''); }}
                                         style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: quickOpen ? 'var(--green-glow)' : 'transparent', color: 'var(--green)', border: '1px solid var(--green)' }}>
-                                        + Tambah Baru
+                                        {t('asg.addNew')}
                                     </button>
                                     <button onClick={() => setPickingFor(null)}
                                         style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'transparent', color: 'var(--text3)', border: '1px solid var(--border)' }}>
-                                        Batal
+                                        {t('common.cancel')}
                                     </button>
                                 </div>
                                 {quickOpen && (
                                     <>
                                         <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 6 }}>
                                             <div>
-                                                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 2 }}>OS Username *</div>
+                                                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 2 }}>{t('asg.osUser')}</div>
                                                 <input value={quickForm.os_username} onChange={e => setQuickForm(f => ({ ...f, os_username: e.target.value }))}
                                                     placeholder="user_a"
                                                     style={{ padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, width: 110 }} />
                                             </div>
                                             <div>
-                                                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 2 }}>Password *</div>
-                                                <input type="password" value={quickForm.password} onChange={e => setQuickForm(f => ({ ...f, password: e.target.value }))}
-                                                    placeholder="••••••"
+                                                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 2 }}>{t('asg.password')}{quickForm.create_in_vm ? '' : ' *'}</div>
+                                                <input type={quickForm.create_in_vm ? 'text' : 'password'} value={quickForm.password} onChange={e => setQuickForm(f => ({ ...f, password: e.target.value }))}
+                                                    placeholder={quickForm.create_in_vm ? t('asg.randomPh') : '••••••'} autoComplete="new-password"
                                                     style={{ padding: '4px 8px', borderRadius: 5, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, width: 110 }} />
                                             </div>
                                             <button onClick={() => doQuickAddAndAssign(s)} disabled={quickSaving}
                                                 style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: 'pointer', background: 'var(--cyan)', color: '#000', border: 'none', opacity: quickSaving ? 0.6 : 1 }}>
-                                                {quickSaving ? '⏳' : 'Tambah & Assign'}
+                                                {quickSaving ? '⏳' : t('asg.addAssign')}
                                             </button>
                                         </div>
+                                        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>
+                                            <input type="checkbox" checked={quickForm.create_in_vm} onChange={e => setQuickForm(f => ({ ...f, create_in_vm: e.target.checked }))} />
+                                            {t('asg.createInVm')}
+                                        </label>
                                         {quickErr && <div style={{ fontSize: 11, color: 'var(--red)' }}>{quickErr}</div>}
                                     </>
                                 )}
@@ -173,5 +187,6 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
                 );
             })}
         </div>
+        </>
     );
 }

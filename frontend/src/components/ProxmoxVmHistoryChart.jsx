@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { fetchProxmoxRrddata, fetchProxmoxIops } from '../api';
 import { formatBytes } from '../format';
+import { locale, useT } from '../i18n';
 
 // CPU/Memory/Network datang dari RRD bawaan Proxmox, yang cuma punya 3 preset (hour/day/week) dengan
 // resolusi tetap (hour ≈ 1 titik/menit, day ≈ 1 titik/30menit, week ≈ 1 titik/3jam) — Proxmox tidak
@@ -46,7 +47,7 @@ function Chart({ title, data, lines, tf, valueFmt }) {
                         tickFormatter={valueFmt ? (v) => valueFmt(v) : undefined} />
                     <Tooltip
                         contentStyle={{ background: 'var(--bg-card2)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }}
-                        labelFormatter={(ms) => new Date(ms).toLocaleString('en-GB')}
+                        labelFormatter={(ms) => new Date(ms).toLocaleString(locale())}
                         formatter={(v, name) => [valueFmt ? valueFmt(v) : v, name]} />
                     {lines.map(l => (
                         <Line key={l.key} type="monotone" dataKey={l.key} name={l.name} stroke={l.color} strokeWidth={1.6} dot={false} isAnimationActive={false} />
@@ -58,6 +59,7 @@ function Chart({ title, data, lines, tf, valueFmt }) {
 }
 
 export default function ProxmoxVmHistoryChart({ instance, node, vmid }) {
+    const t = useT();
     const [timeframeId, setTimeframeId] = useState('1h');
     const tf = tfById(timeframeId);
     const [data, setData] = useState([]);
@@ -89,11 +91,11 @@ export default function ProxmoxVmHistoryChart({ instance, node, vmid }) {
             setError(null);
             setLastUpdated(new Date());
         } catch (e) {
-            if (!silent) setError(e?.response?.data?.detail || 'Gagal mengambil data historis');
+            if (!silent) setError(e?.response?.data?.detail || t('hist.loadFailed'));
         } finally {
             if (!silent) setLoading(false);
         }
-    }, [instance, node, vmid, tf.id, tf.rrdSource, tf.ms]);
+    }, [instance, node, vmid, tf.id, tf.rrdSource, tf.ms, t]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -108,25 +110,25 @@ export default function ProxmoxVmHistoryChart({ instance, node, vmid }) {
         <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
                 <div style={{ fontSize: 10, color: 'var(--text3)' }}>
-                    {tf.live && <span style={{ color: 'var(--green)' }}>● live</span>}
-                    {lastUpdated && <span> · update {lastUpdated.toLocaleTimeString('id-ID')}</span>}
+                    {tf.live && <span style={{ color: 'var(--green)' }}>{t('hist.live')}</span>}
+                    {lastUpdated && <span>{t('hist.updated', { time: lastUpdated.toLocaleTimeString(locale()) })}</span>}
                 </div>
                 <div style={{ display: 'inline-flex', gap: 2, background: 'var(--bg-hover)', borderRadius: 7, padding: 2 }}>
-                    {TIMEFRAMES.map(t => (
-                        <button key={t.id} onClick={() => setTimeframeId(t.id)}
+                    {TIMEFRAMES.map(tfo => (
+                        <button key={tfo.id} onClick={() => setTimeframeId(tfo.id)}
                             style={{
                                 padding: '4px 10px', borderRadius: 5, fontSize: 11, fontFamily: 'var(--fmono)', cursor: 'pointer', border: 'none',
-                                background: timeframeId === t.id ? 'var(--cyan)' : 'transparent',
-                                color: timeframeId === t.id ? '#000' : 'var(--text3)',
-                                fontWeight: timeframeId === t.id ? 700 : 400,
+                                background: timeframeId === tfo.id ? 'var(--cyan)' : 'transparent',
+                                color: timeframeId === tfo.id ? '#000' : 'var(--text3)',
+                                fontWeight: timeframeId === tfo.id ? 700 : 400,
                             }}>
-                            {t.label}
+                            {tfo.label}
                         </button>
                     ))}
                 </div>
             </div>
 
-            {loading && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 10 }}>Loading…</div>}
+            {loading && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 10 }}>{t('common.loading')}</div>}
             {error && (
                 <div style={{ background: 'var(--red-glow)', border: '1px solid var(--red)', borderRadius: 6, padding: '6px 10px', color: 'var(--red)', fontSize: 11, marginBottom: 12 }}>⚠ {error}</div>
             )}
@@ -135,32 +137,31 @@ export default function ProxmoxVmHistoryChart({ instance, node, vmid }) {
                 <>
                     {tf.ms <= 10 * 60_000 && (
                         <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 10, lineHeight: 1.5 }}>
-                            CPU/Memory/Network dibatasi resolusi Proxmox sendiri (maksimal ±1 titik/menit) — di jendela sependek ini
-                            mungkin cuma kelihatan 1-2 titik. Disk IOPS di bawah lebih detail karena datanya sampling milik dashboard sendiri tiap 15 detik.
+                            {t('hist.lowRes')}
                         </div>
                     )}
-                    <Chart title="CPU Usage (%)" data={data} tf={tf}
+                    <Chart title={t('hist.cpu')} data={data} tf={tf}
                         lines={[{ key: 'cpu_pct', name: 'CPU %', color: 'var(--cyan)' }]}
                         valueFmt={v => `${v}%`} />
-                    <Chart title="Memory Usage (MB)" data={data} tf={tf}
-                        lines={[{ key: 'mem_mb', name: 'Memory MB', color: 'var(--purple)' }]}
+                    <Chart title={t('hist.memory')} data={data} tf={tf}
+                        lines={[{ key: 'mem_mb', name: t('hist.memorySeries'), color: 'var(--purple)' }]}
                         valueFmt={v => formatBytes(v * 1024 * 1024)} />
-                    <Chart title="Network (KB/s)" data={data} tf={tf}
+                    <Chart title={t('hist.network')} data={data} tf={tf}
                         lines={[
                             { key: 'netin_kbps', name: 'RX KB/s', color: 'var(--green)' },
                             { key: 'netout_kbps', name: 'TX KB/s', color: 'var(--orange)' },
                         ]}
                         valueFmt={v => `${v} KB/s`} />
                     {iops.length > 0 ? (
-                        <Chart title="Disk IOPS (ops/s)" data={iops} tf={tf}
+                        <Chart title={t('hist.iops')} data={iops} tf={tf}
                             lines={[
-                                { key: 'read_iops', name: 'Read IOPS', color: 'var(--cyan)' },
-                                { key: 'write_iops', name: 'Write IOPS', color: 'var(--yellow)' },
+                                { key: 'read_iops', name: t('hist.readIops'), color: 'var(--cyan)' },
+                                { key: 'write_iops', name: t('hist.writeIops'), color: 'var(--yellow)' },
                             ]}
                             valueFmt={v => `${v}`} />
                     ) : (
                         <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                            Disk IOPS: belum ada data di jendela ini. IOPS disampling dashboard tiap 15 detik selama VM running (disimpan 14 hari).
+                            {t('hist.noIops')}
                         </div>
                     )}
                 </>

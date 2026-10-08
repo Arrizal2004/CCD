@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { getVmCreds, upsertVmCreds, deleteVmCreds, testVmCreds } from '../api';
+import { tNodes, useT } from '../i18n';
 
 export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults }) {
+    const t = useT();
     const [osType,   setOsType]   = useState('');      // '' = belum dipilih
     const [form, setForm] = useState({
         cred_type:     'ssh',
@@ -83,14 +85,14 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
     };
 
     const handleSave = async () => {
-        if (!osType) { setError('Pilih OS terlebih dahulu'); return; }
-        if (!form.ssh_host.trim()) { setError('IP / Hostname VM wajib diisi'); return; }
-        if (!form.username.trim()) { setError('Username wajib diisi'); return; }
+        if (!osType) { setError(t('cred.pickOs')); return; }
+        if (!form.ssh_host.trim()) { setError(t('cred.hostRequired')); return; }
+        if (!form.username.trim()) { setError(t('cred.userRequired')); return; }
         if (authMode === 'password' && !form.password.trim() && !existing?.has_password) {
-            setError('Password wajib diisi'); return;
+            setError(t('cred.passwordRequired')); return;
         }
         if (authMode === 'pkey' && !form.pkey.trim() && !existing?.has_pkey) {
-            setError('Private key wajib diisi'); return;
+            setError(t('cred.keyRequired')); return;
         }
 
         setSaving(true);
@@ -135,7 +137,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
     };
 
     const handleDelete = async () => {
-        if (!confirm(`Hapus credentials untuk VM "${vm.vm_name}"?`)) return;
+        if (!confirm(t('cred.deleteConfirm', { name: vm.vm_name }))) return;
         try {
             await deleteVmCreds(hostName, vmId);
             onSaved?.(null);
@@ -165,32 +167,32 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                 }}>
                     <div>
                         <div style={{ fontFamily: 'var(--fmono)', fontSize: 15, fontWeight: 600, color: 'var(--cyan)' }}>
-                            🔑 Konfigurasi Koneksi VM
+                            {t('cred.title')}
                         </div>
                         <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>
                             {vm.vm_name} · {hostName}
                             {existing && (
                                 <span style={{ marginLeft: 8, color: osType === 'linux' ? 'var(--green)' : 'var(--cyan)' }}>
-                                    ● Tersimpan
+                                    {t('cred.saved')}
                                 </span>
                             )}
                         </div>
                     </div>
-                    <button onClick={onClose} style={closeBtn}>✕</button>
+                    <button onClick={onClose} aria-label={t('common.close')} style={closeBtn}>✕</button>
                 </div>
 
                 <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
 
                     {/* ── Langkah 1: Pilih OS ─────────────────────────────── */}
                     <div>
-                        <div style={stepLabel}>① Pilih Sistem Operasi VM</div>
+                        <div style={stepLabel}>{t('cred.step1')}</div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                             <OsCard
                                 selected={osType === 'linux'}
                                 onClick={() => setOsType('linux')}
                                 icon="🐧"
                                 title="Linux"
-                                subtitle="Ubuntu, Debian, CentOS, dll"
+                                subtitle={t('cred.linuxSub')}
                                 color="#4ade80"
                                 proto="SSH (Paramiko PTY)"
                             />
@@ -199,7 +201,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                 onClick={() => setOsType('windows')}
                                 icon="⊞"
                                 title="Windows"
-                                subtitle="Windows Server, Windows 10/11"
+                                subtitle={t('cred.windowsSub')}
                                 color="#8be9fd"
                                 proto="RDP (Guacamole)"
                             />
@@ -218,34 +220,33 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                 lineHeight: 1.6,
                             }}>
                                 {osType === 'linux'
-                                    ? '🐧 Protokol: SSH via Paramiko. Backend terhubung langsung ke IP VM. Terminal mendukung PTY penuh, resize, dan Ctrl+C.'
-                                    : '⊞ Protokol: RDP standar via Guacamole. Memerlukan VM terhubung ke jaringan (IP dapat dijangkau backend).'}
+                                    ? t('cred.linuxInfo')
+                                    : t('cred.windowsInfo')}
                             </div>
 
                             {/* Langkah 2 */}
                             <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-                                <div style={stepLabel}>② Konfigurasi Akses</div>
+                                <div style={stepLabel}>{t('cred.step2')}</div>
                                 {!existing && defaults?.username && (
                                     <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.5, marginBottom: 10 }}>
-                                        Username & IP diisi dari cloud-init Proxmox. Password tidak bisa dibaca dari Proxmox
-                                        (disimpan dalam bentuk hash) — isi password yang dipakai saat membuat VM.
+                                        {t('cred.fromCloudInit')}
                                     </div>
                                 )}
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
                                     {/* Pilih protokol Quick-Connect Guacamole: SSH atau RDP */}
                                     <div>
-                                        <label style={labelStyle}>Protokol Quick-Connect (Guacamole)</label>
+                                        <label style={labelStyle}>{t('cred.protocol')}</label>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                                             <ProtoCard
                                                 selected={form.guac_protocol === 'ssh'}
                                                 onClick={() => pickProto('ssh')}
-                                                icon="🖥" title="SSH" subtitle="Terminal teks · port 22" color="#4ade80"
+                                                icon="🖥" title="SSH" subtitle={t('cred.sshSub')} color="#4ade80"
                                             />
                                             <ProtoCard
                                                 selected={form.guac_protocol === 'rdp'}
                                                 onClick={() => pickProto('rdp')}
-                                                icon="🪟" title="RDP" subtitle="Desktop grafis · port 3389" color="#8be9fd"
+                                                icon="🪟" title="RDP" subtitle={t('cred.rdpSub')} color="#8be9fd"
                                             />
                                         </div>
                                     </div>
@@ -253,7 +254,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                     {/* IP + Port — target koneksi Guacamole */}
                                     <div>
                                         <label style={labelStyle}>
-                                            {form.guac_protocol === 'rdp' ? 'IP Address VM (target RDP)' : 'IP Address / Hostname VM'}
+                                            {form.guac_protocol === 'rdp' ? t('cred.ipRdp') : t('cred.ip')}
                                         </label>
                                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: 8 }}>
                                             <input
@@ -272,8 +273,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                         </div>
                                         {osType === 'windows' && (
                                             <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 5, lineHeight: 1.5 }}>
-                                                💡 Otomasi Windows tetap via PowerShell Direct (nama VM {vm.vm_name}).
-                                                IP di atas dipakai untuk koneksi {(form.guac_protocol || 'rdp').toUpperCase()} Guacamole.
+                                                {t('cred.windowsNote', { name: vm.vm_name, proto: (form.guac_protocol || 'rdp').toUpperCase() })}
                                             </div>
                                         )}
                                     </div>
@@ -281,7 +281,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                     {/* Username */}
                                     <div>
                                         <label style={labelStyle}>
-                                            {osType === 'linux' ? 'Username SSH' : 'Username lokal VM (akun administrator)'}
+                                            {osType === 'linux' ? t('cred.userSsh') : t('cred.userWindows')}
                                         </label>
                                         <input
                                             value={form.username}
@@ -294,7 +294,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                     {/* Auth mode — hanya untuk Linux */}
                                     {osType === 'linux' && (
                                         <div>
-                                            <label style={labelStyle}>Metode Autentikasi</label>
+                                            <label style={labelStyle}>{t('cred.authMethod')}</label>
                                             <div style={{ display: 'flex', gap: 8 }}>
                                                 {[['password', '🔑 Password'], ['pkey', '🗝️ Private Key']].map(([v, l]) => (
                                                     <button key={v} onClick={() => setAuthMode(v)} style={tabBtn(authMode === v)}>
@@ -309,10 +309,10 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                     {(osType === 'windows' || authMode === 'password') && (
                                         <div>
                                             <label style={labelStyle}>
-                                                Password
+                                                {t('cred.password')}
                                                 {existing?.has_password && (
                                                     <span style={{ color: 'var(--green)', marginLeft: 6 }}>
-                                                        ✓ Tersimpan (kosongkan untuk tetap pakai yg lama)
+                                                        {t('cred.keepOld')}
                                                     </span>
                                                 )}
                                             </label>
@@ -320,7 +320,7 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                                 type="password"
                                                 value={form.password}
                                                 onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                                                placeholder={existing?.has_password ? '••••••••' : 'Password'}
+                                                placeholder={existing?.has_password ? '••••••••' : t('cred.password')}
                                                 style={{ ...inputStyle, width: '100%', boxSizing: 'border-box' }}
                                             />
                                         </div>
@@ -330,9 +330,9 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                     {osType === 'linux' && authMode === 'pkey' && (
                                         <div>
                                             <label style={labelStyle}>
-                                                Private Key (PEM)
+                                                {t('cred.privateKey')}
                                                 {existing?.has_pkey && (
-                                                    <span style={{ color: 'var(--green)', marginLeft: 6 }}>✓ Tersimpan</span>
+                                                    <span style={{ color: 'var(--green)', marginLeft: 6 }}>{t('cred.storedShort')}</span>
                                                 )}
                                             </label>
                                             <textarea
@@ -351,14 +351,12 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                     {/* Sudo note */}
                                     {osType === 'linux' && (
                                         <div style={noteBanner('#4ade80')}>
-                                            💡 Untuk otomasi (konfigurasi IP, ekspansi disk), user memerlukan akses <code>sudo</code>.
-                                            Rekomendasi: tambahkan <code>{form.username || 'ubuntu'} ALL=(ALL) NOPASSWD:ALL</code> di sudoers.
+                                            {tNodes('cred.sudoNote', { sudo: <code>sudo</code>, line: <code>{form.username || 'ubuntu'} ALL=(ALL) NOPASSWD:ALL</code> })}
                                         </div>
                                     )}
                                     {osType === 'windows' && (
                                         <div style={noteBanner('#8be9fd')}>
-                                            ⚠ PS Direct memerlukan VM dalam keadaan <strong>Running</strong> dan
-                                            Integration Services aktif. Username harus akun lokal administrator di VM.
+                                            {tNodes('cred.psNote', { running: <strong>{t('cred.running')}</strong> })}
                                         </div>
                                     )}
                                 </div>
@@ -368,8 +366,8 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                             {testResult && (
                                 <div style={noteBanner(testResult.ok ? '#4ade80' : '#f87171')}>
                                     {testResult.ok
-                                        ? '✓ Koneksi berhasil!'
-                                        : `✗ Gagal: ${testResult.error}`}
+                                        ? t('cred.testOk')
+                                        : t('cred.testFail', { error: testResult.error })}
                                 </div>
                             )}
 
@@ -380,17 +378,17 @@ export default function SshCredModal({ vm, hostName, onClose, onSaved, defaults 
                                 <div style={{ display: 'flex', gap: 8 }}>
                                     {existing && osType === 'linux' && (
                                         <button onClick={handleTest} disabled={testing} style={secBtn}>
-                                            {testing ? 'Testing...' : '⚡ Test SSH'}
+                                            {testing ? t('cred.testing') : t('cred.test')}
                                         </button>
                                     )}
                                     {existing && (
-                                        <button onClick={handleDelete} style={dangerBtn}>🗑 Hapus</button>
+                                        <button onClick={handleDelete} style={dangerBtn}>{t('cred.delete')}</button>
                                     )}
                                 </div>
                                 <div style={{ display: 'flex', gap: 8 }}>
-                                    <button onClick={onClose} style={secBtn}>Batal</button>
+                                    <button onClick={onClose} style={secBtn}>{t('common.cancel')}</button>
                                     <button onClick={handleSave} disabled={saving} style={primaryBtn(osType)}>
-                                        {saving ? 'Menyimpan...' : '💾 Simpan'}
+                                        {saving ? t('common.saving') : t('cred.save')}
                                     </button>
                                 </div>
                             </div>

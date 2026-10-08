@@ -1,7 +1,13 @@
-// Global muted footer — academic copyright / attribution line.
-// Kept subtle (small, low-emphasis) so it never competes with the metrics charts.
+import { useBranding } from '../branding';
+import { useT } from '../i18n';
 
+// Footer tipis. Nama institusi dari Pengaturan Sistem; nama proyek tetap disebut sebagai atribusi
+// open source walaupun sistemnya diberi nama lain.
 export default function AppFooter() {
+    const b = useBranding();
+    const t = useT();
+    const owner = b.institution || b.name;
+    const based = b.name === 'Campus Cloud Dashboard' ? t('footer.license') : t('footer.based');
     return (
         <footer style={{
             borderTop: '1px solid var(--border)',
@@ -16,7 +22,7 @@ export default function AppFooter() {
                 fontFamily: 'var(--fmono)',
                 letterSpacing: '0.01em'
             }}>
-                © 2026 Campus Cloud Dashboard · Open source under MIT License
+                © {new Date().getFullYear()} {owner} · {based}
             </span>
         </footer>
     );

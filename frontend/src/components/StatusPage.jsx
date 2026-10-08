@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchHealthz, fetchProxmoxInstances, fetchProxmoxNodes, fetchProxmoxVms } from '../api';
+import VpsResourcePanel from './VpsResourcePanel';
+import { locale, useT } from '../i18n';
 
 const DOT = { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 };
 const COLOR = { ok: '#4ade80', warn: '#f0c040', error: '#f87171', unknown: '#6b7280' };
@@ -53,6 +55,7 @@ function Row({ label, status, sub, right, mono }) {
 }
 
 export default function StatusPage() {
+    const t = useT();
     const [health, setHealth]     = useState(null);
     const [nodes, setNodes]       = useState([]); // [{instance, node, status}]
     const [vmsByNode, setVmsByNode] = useState({}); // {"instance:node": [vm,...]}
@@ -92,7 +95,7 @@ export default function StatusPage() {
         : overallStatuses.includes('warn') ? 'warn'
         : overallStatuses.every(s => s === 'ok') ? 'ok' : 'unknown';
 
-    const overallLabel = { ok: 'Semua Sistem Normal', warn: 'Degraded', error: 'Ada Masalah', unknown: 'Mengecek...' };
+    const overallLabel = { ok: t('status.ok'), warn: t('status.warn'), error: t('status.error'), unknown: t('status.checking') };
 
     const allVms = Object.entries(vmsByNode).flatMap(([node, vms]) => vms.map(vm => ({ ...vm, _node: node })));
     const runningVms = allVms.filter(v => v.status === 'running');
@@ -111,7 +114,7 @@ export default function StatusPage() {
                     <div style={{ fontSize: 14, fontWeight: 700, color: statusColor(overall) }}>{overallLabel[overall]}</div>
                     {lastRefresh && (
                         <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>
-                            Diperbarui: {lastRefresh.toLocaleTimeString()} · auto-refresh 30 detik
+                            {t('status.updated', { time: lastRefresh.toLocaleTimeString(locale()) })}
                         </div>
                     )}
                 </div>
@@ -119,14 +122,21 @@ export default function StatusPage() {
                     marginLeft: 'auto', padding: '5px 14px', borderRadius: 6, fontSize: 11, cursor: 'pointer',
                     background: 'transparent', border: '1px solid var(--border)', color: 'var(--text3)',
                 }}>
-                    {loading ? '...' : '↻ Refresh'}
+                    {loading ? '...' : t('status.refresh')}
                 </button>
+            </div>
+
+            {/* Resource VPS tempat dashboard berjalan */}
+            <div style={{ marginBottom: 16 }}>
+                <SectionCard title={t('status.vps')}>
+                    <VpsResourcePanel />
+                </SectionCard>
             </div>
 
             <div className="ccd-stack-mobile" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
 
                 {/* Backend Services */}
-                <SectionCard title="Backend Services">
+                <SectionCard title={t('status.backend')}>
                     <Row
                         status={apiStatus}
                         label="Backend API"
@@ -167,12 +177,12 @@ export default function StatusPage() {
 
                 {/* Proxmox Nodes */}
                 <SectionCard
-                    title="Proxmox Nodes"
-                    extra={<span style={{ fontSize: 10, color: 'var(--text3)' }}>{nodes.filter(n => n.status === 'online').length}/{nodes.length} online</span>}
+                    title={t('status.nodes')}
+                    extra={<span style={{ fontSize: 10, color: 'var(--text3)' }}>{t('status.online', { n: nodes.filter(n => n.status === 'online').length, total: nodes.length })}</span>}
                 >
                     {nodes.length === 0 && (
                         <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text3)' }}>
-                            {pveStatus === 'error' ? (health?.checks?.proxmox?.error || 'Tidak bisa menghubungi Proxmox API') : 'Tidak ada node.'}
+                            {pveStatus === 'error' ? (health?.checks?.proxmox?.error || t('status.pveUnreachable')) : t('status.noNodes')}
                         </div>
                     )}
                     {nodes.map(n => {
@@ -183,7 +193,7 @@ export default function StatusPage() {
                             <Row key={`${n.instance}:${n.node}`}
                                 status={st}
                                 label={`${n.instance}/${n.node}`}
-                                sub={`${running}/${vms.length} VM running`}
+                                sub={t('status.nodeVms', { running, total: vms.length })}
                                 mono
                                 right={<StatusBadge status={st} label={n.status} />}
                             />
@@ -194,11 +204,11 @@ export default function StatusPage() {
 
             {/* VMs per node */}
             <SectionCard
-                title="Virtual Machines"
-                extra={<span style={{ fontSize: 10, color: 'var(--text3)' }}>{runningVms.length}/{allVms.length} running</span>}
+                title={t('status.vms')}
+                extra={<span style={{ fontSize: 10, color: 'var(--text3)' }}>{t('status.runningCount', { n: runningVms.length, total: allVms.length })}</span>}
             >
                 {allVms.length === 0 && (
-                    <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text3)' }}>Tidak ada VM.</div>
+                    <div style={{ padding: '14px 16px', fontSize: 12, color: 'var(--text3)' }}>{t('status.noVms')}</div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))' }}>
                     {allVms.map(vm => {
@@ -216,7 +226,7 @@ export default function StatusPage() {
                                     </div>
                                     <div style={{ fontSize: 10, color: 'var(--text3)' }}>{vm._node} · VMID {vm.vmid}</div>
                                 </div>
-                                <StatusBadge status={st} label={vm.status} />
+                                <StatusBadge status={st} label={['running', 'stopped', 'paused'].includes(vm.status) ? t(`vmstatus.${vm.status}`) : vm.status} />
                             </div>
                         );
                     })}

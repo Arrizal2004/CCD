@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { createOpenWebTicket } from '../api';
+import { useT } from '../i18n';
 
 const STORAGE_KEY = 'ccd-openweb-url';
 const btn = { padding: '5px 12px', fontSize: 11, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--cyan)', color: 'var(--cyan)' };
@@ -30,6 +31,7 @@ function loadLast() {
 }
 
 export default function OpenWebPage() {
+    const t = useT();
     const [input, setInput] = useState(loadLast);
     const [target, setTarget] = useState(null);   // { src, shown, proxied }
     const [error, setError] = useState(null);
@@ -38,7 +40,7 @@ export default function OpenWebPage() {
 
     const open = async (raw) => {
         const n = normalizeUrl(raw);
-        if (!n) { setError('Alamat tidak valid. Periksa kembali alamat yang diketik'); return; }
+        if (!n) { setError(t('openweb.invalid')); return; }
         setError(null);
         setInput(n);
         setLoading(true);
@@ -53,7 +55,7 @@ export default function OpenWebPage() {
             try { localStorage.setItem(STORAGE_KEY, n); } catch { /* storage tidak tersedia */ }
         } catch (e) {
             setTarget(null);
-            setError(e?.response?.data?.detail || 'Gagal membuka alamat');
+            setError(e?.response?.data?.detail || t('openweb.failed'));
         } finally {
             setLoading(false);
         }
@@ -64,28 +66,28 @@ export default function OpenWebPage() {
     return (
         <div style={{ padding: '14px 20px', maxWidth: 1600, margin: '0 auto' }}>
             <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>
-                Open Web
+                {t('openweb.title')}
             </div>
 
             <form onSubmit={e => { e.preventDefault(); open(input); }} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
                 <input value={input} onChange={e => setInput(e.target.value)}
-                    spellCheck={false} autoComplete="off"
+                    spellCheck={false} autoComplete="off" aria-label={t('openweb.address')}
                     style={{ flex: 1, minWidth: 220, padding: '6px 10px', fontSize: 12, fontFamily: 'var(--fmono)', background: 'var(--bg-panel)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: 5 }} />
-                <button type="submit" style={btn} disabled={loading}>{loading ? '…' : 'Buka'}</button>
-                <button type="button" style={btn} disabled={!target || loading} onClick={() => open(target.shown)}>Reload</button>
-                {target && <a href={target.src} target="_blank" rel="noopener noreferrer" style={{ ...btn, textDecoration: 'none' }}>Tab baru</a>}
+                <button type="submit" style={btn} disabled={loading}>{loading ? '…' : t('openweb.open')}</button>
+                <button type="button" style={btn} disabled={!target || loading} onClick={() => open(target.shown)}>{t('openweb.reload')}</button>
+                {target && <a href={target.src} target="_blank" rel="noopener noreferrer" style={{ ...btn, textDecoration: 'none' }}>{t('openweb.newTab')}</a>}
             </form>
 
             {error && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 8 }}>{error}</div>}
             {mixed && (
                 <div style={{ color: 'var(--yellow, #ffb300)', fontSize: 11, marginBottom: 8 }}>
-                    Dashboard dibuka lewat HTTPS sedangkan alamat ini HTTP, browser akan memblokir tampilan ini. Gunakan "Tab baru" atau alamat HTTPS.
+                    {t('openweb.mixed')}
                 </div>
             )}
 
             {target ? (
                 <>
-                    <iframe key={`${target.src}|${reloadKey}`} title="Open Web" src={target.src}
+                    <iframe key={`${target.src}|${reloadKey}`} title={t('openweb.title')} src={target.src}
                         sandbox={target.proxied
                             ? 'allow-scripts allow-forms allow-popups allow-downloads'
                             : 'allow-scripts allow-forms allow-same-origin allow-popups allow-downloads'}
@@ -93,12 +95,12 @@ export default function OpenWebPage() {
                         style={{ width: '100%', height: 'calc(100vh - 210px)', minHeight: 400, border: '1px solid var(--border)', borderRadius: 6, background: '#fff' }} />
                     <div style={{ color: 'var(--text3)', fontSize: 10, marginTop: 6 }}>
                         {target.proxied
-                            ? 'Dimuat lewat proxy dashboard (hanya http). Halaman yang memakai path absolut (/static/...) atau butuh login/cookie bisa tampil tidak lengkap. Pakai kolom alamat untuk berpindah.'
-                            : 'Kalau area ini kosong, web tersebut melarang ditampilkan di iframe (X-Frame-Options / CSP frame-ancestors). Pakai "Tab baru".'}
+                            ? t('openweb.proxied')
+                            : t('openweb.direct')}
                     </div>
                 </>
             ) : (
-                !error && <div style={{ color: 'var(--text3)', fontSize: 12 }}>Ketik alamat web di atas lalu klik Buka.</div>
+                !error && <div style={{ color: 'var(--text3)', fontSize: 12 }}>{t('openweb.hint')}</div>
             )}
         </div>
     );

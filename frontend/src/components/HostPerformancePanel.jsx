@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchHostStatus } from '../api';
 import { formatBytes, formatUptime } from '../format';
+import { useT } from '../i18n';
 
 const POLL_MS = 5000;
 
@@ -44,6 +45,7 @@ function NetRate({ label, bps, color }) {
 }
 
 export default function HostPerformancePanel() {
+    const t = useT();
     const [hosts, setHosts] = useState(null);
     const [error, setError] = useState(null);
 
@@ -53,9 +55,9 @@ export default function HostPerformancePanel() {
             setHosts(data);
             setError(null);
         } catch (e) {
-            if (!silent) setError(e?.response?.data?.detail || 'Gagal memuat status host');
+            if (!silent) setError(e?.response?.data?.detail || t('host.loadFailed'));
         }
-    }, []);
+    }, [t]);
 
     useEffect(() => {
         load();
@@ -70,7 +72,7 @@ export default function HostPerformancePanel() {
     return (
         <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ color: 'var(--green)' }}>●</span> Host Performance · live
+                <span style={{ color: 'var(--green)' }}>●</span> {t('host.title')}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
                 {hosts.map(h => (
@@ -78,12 +80,12 @@ export default function HostPerformancePanel() {
                         style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
                             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{h.instance}/{h.node}</div>
-                            <div style={{ fontSize: 10, color: 'var(--text3)' }}>up {formatUptime(h.uptime_s)}</div>
+                            <div style={{ fontSize: 10, color: 'var(--text3)' }}>{t('host.up', { time: formatUptime(h.uptime_s) })}</div>
                         </div>
 
-                        <Bar label={`CPU (${h.cpus || '?'} core)`} valuePct={h.cpu_pct} />
+                        <Bar label={t('host.cpu', { n: h.cpus || '?' })} valuePct={h.cpu_pct} />
                         <Bar label="RAM" used={h.mem_used} total={h.mem_total} />
-                        <Bar label="Disk (root)" used={h.disk_used} total={h.disk_total} />
+                        <Bar label={t('host.disk')} used={h.disk_used} total={h.disk_total} />
 
                         <div style={{ display: 'flex', gap: 4, marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
                             <NetRate label="↓ RX" bps={h.net_in_bps} color="var(--green)" />

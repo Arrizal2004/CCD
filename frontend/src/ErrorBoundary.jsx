@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import { t } from './i18n';
 
 export default class ErrorBoundary extends Component {
     constructor(props) {
@@ -23,7 +24,7 @@ export default class ErrorBoundary extends Component {
                     background: '#0b0f1a', color: '#ff1744', fontFamily: 'monospace', gap: 16
                 }}>
                     <div style={{ fontSize: 32 }}>⚠</div>
-                    <div style={{ fontSize: 14, color: '#e8f0fe' }}>Terjadi error rendering. Dashboard akan reload...</div>
+                    <div style={{ fontSize: 14, color: '#e8f0fe' }}>{t('app.renderError')}</div>
                     <div style={{ fontSize: 11, color: '#4a6a8a', maxWidth: 500, textAlign: 'center' }}>
                         {this.state.error?.message}
                     </div>
@@ -35,7 +36,7 @@ export default class ErrorBoundary extends Component {
                             fontFamily: 'monospace', cursor: 'pointer', fontWeight: 600
                         }}
                     >
-                        ↺ Retry
+                        {t('app.retry')}
                     </button>
                 </div>
             );
