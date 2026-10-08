@@ -4,6 +4,7 @@ header Accept-Language ("id" atau "en"); LanguageMiddleware menyimpannya untuk s
 tr("teks Indonesia", "English text") memilih versinya. Tugas latar yang dibuat dari permintaan itu ikut
 mewarisi bahasanya. Tanpa header (skrip, bastion, test lama) pesan berbahasa Indonesia.
 """
+from contextlib import contextmanager
 from contextvars import ContextVar
 
 LANGUAGES = ("id", "en")
@@ -25,6 +26,16 @@ def current() -> str:
 
 def tr(id_text: str, en_text: str) -> str:
     return en_text if _lang.get() == "en" else id_text
+
+
+@contextmanager
+def lang_as(code: str):
+    """Pakai bahasa `code` sementara, mis. untuk menyusun satu kalimat dalam dua bahasa (services/audit.both)."""
+    token = _lang.set(code if code in LANGUAGES else "id")
+    try:
+        yield
+    finally:
+        _lang.reset(token)
 
 
 class LanguageMiddleware:

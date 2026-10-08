@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from auth import get_current_user, Role, SECRET_KEY
 from database import get_pool, get_student_vm_ids
-from services.audit import log_activity
+from services.audit import both, log_activity
 from i18n import tr
 
 router = APIRouter()
@@ -181,7 +181,8 @@ async def create_ticket(body: TicketBody, request: Request, user: dict = Depends
                VALUES ($1, $2, $3, $4, $5, $6)""",
             sid, int(user["sub"]), user.get("username") or "", user.get("role") or "", str(ip), expires)
     await log_activity(user, "OPENWEB_OPEN", "INFO", {"id": str(ip), "name": host},
-                       f"{user.get('username')} membuka Open Web ke {host} (sesi {sid[:8]})", request)
+                       both(lambda: tr(f"{user.get('username')} membuka Open Web ke {host} (sesi {sid[:8]})",
+                                    f"{user.get('username')} opened Open Web to {host} (session {sid[:8]})")), request)
     ticket = _sign(json.dumps({"h": str(ip), "u": user["sub"], "s": sid, "e": int(expires.timestamp())},
                               separators=(",", ":")).encode())
     path = u.path or "/"

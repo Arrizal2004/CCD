@@ -28,7 +28,7 @@ from auth import require_sysadmin, get_current_user
 from database import get_pool
 from services import guest_accounts
 from i18n import tr
-from services.audit import log_activity
+from services.audit import both, log_activity
 
 log = logging.getLogger("groups")
 router = APIRouter()
@@ -65,8 +65,9 @@ async def _get_group_or_404(conn, group_id: int) -> dict:
 
 def _mode_text(body: VmAccessBody) -> str:
     if body.auth_mode == "credentials":
-        return f"kredensial bersama, akun OS '{(body.os_username or '').strip()}'"
-    return "akun mandiri"
+        acc = (body.os_username or "").strip()
+        return tr(f"kredensial bersama, akun OS '{acc}'", f"shared credentials, OS account '{acc}'")
+    return tr("akun mandiri", "own account")
 
 
 # ── Group CRUD ───────────────────────────────────────────────────────────────
@@ -101,7 +102,7 @@ async def create_group(body: GroupBody, request: Request, user: dict = Depends(r
             raise HTTPException(status_code=409, detail=tr("Nama grup sudah digunakan",
                                                            "This group name is already used"))
     await log_activity(user, "GROUP_CREATE", "INFO", None,
-                       f"{user.get('username')} membuat grup '{row['name']}'", request)
+                       both(lambda: tr(f"{user.get('username')} membuat grup '{row['name']}'", f"{user.get('username')} created the group '{row['name']}'")), request)
     return dict(row)
 
 
@@ -120,12 +121,14 @@ async def update_group(group_id: int, body: GroupBody, request: Request, user: d
                                                            "This group name is already used"))
     changes = []
     if row["name"] != old["name"]:
-        changes.append(f"nama '{old['name']}' → '{row['name']}'")
+        changes.append(both(lambda: tr(f"nama '{old['name']}' → '{row['name']}'", f"name '{old['name']}' → '{row['name']}'")))
     if (row["description"] or "") != (old["description"] or ""):
-        changes.append("deskripsi diubah")
+        changes.append(both(lambda: tr("deskripsi diubah", "description changed")))
     if changes:
         await log_activity(user, "GROUP_UPDATE", "INFO", None,
-                           f"{user.get('username')} mengubah grup '{old['name']}': {'; '.join(changes)}", request)
+                           both(lambda: tr(f"{user.get('username')} mengubah grup '{old['name']}': {'; '.join(c.t() for c in changes)}",
+                                           f"{user.get('username')} changed the group '{old['name']}': {'; '.join(c.t() for c in changes)}")),
+                           request)
     return dict(row)
 
 
@@ -138,7 +141,8 @@ async def delete_group(group_id: int, request: Request, user: dict = Depends(req
         vms = await conn.fetchval("SELECT count(*) FROM group_vm_access WHERE group_id = $1", group_id)
         await conn.execute("DELETE FROM groups WHERE id = $1", group_id)
     await log_activity(user, "GROUP_DELETE", "WARNING", None,
-                       f"{user.get('username')} menghapus grup '{group['name']}' ({members} anggota, {vms} VM)",
+                       both(lambda: tr(f"{user.get('username')} menghapus grup '{group['name']}' ({members} anggota, {vms} VM)",
+                       f"{user.get('username')} deleted the group '{group['name']}' ({members} members, {vms} VMs)")),
                        request)
 
 
@@ -176,7 +180,8 @@ async def add_member(group_id: int, body: MemberBody, request: Request, actor: d
             raise HTTPException(status_code=409, detail=tr("User sudah menjadi anggota grup ini",
                                                            "The user is already a member of this group"))
     await log_activity(actor, "GROUP_MEMBER_ADD", "WARNING", None,
-                       f"{actor.get('username')} menambahkan '{user['username']}' ke grup '{group['name']}'", request)
+                       both(lambda: tr(f"{actor.get('username')} menambahkan '{user['username']}' ke grup '{group['name']}'",
+                       f"{actor.get('username')} added '{user['username']}' to the group '{group['name']}'")), request)
     return {"group_id": group_id, "user_id": body.user_id, "username": user["username"]}
 
 
@@ -194,7 +199,8 @@ async def remove_member(group_id: int, user_id: int, request: Request, actor: di
                                                            "Member not found in this group"))
         username = await conn.fetchval("SELECT username FROM users WHERE id = $1", user_id)
     await log_activity(actor, "GROUP_MEMBER_REMOVE", "WARNING", None,
-                       f"{actor.get('username')} mengeluarkan '{username or f'#{user_id}'}' dari grup '{group['name']}'",
+                       both(lambda: tr(f"{actor.get('username')} mengeluarkan '{username or f'#{user_id}'}' dari grup '{group['name']}'",
+                       f"{actor.get('username')} removed '{username or f'#{user_id}'}' from the group '{group['name']}'")),
                        request)
 
 
@@ -249,10 +255,12 @@ async def _apply_in_vm(body: VmAccessBody, group_id: int, user: dict, request: R
     password = guest_accounts.check_password(body.os_password)
     result = await guest_accounts.ensure_user(body.host_name, body.vm_id, username, password)
     await guest_accounts.update_stored_password(body.host_name, body.vm_id, username, password)
-    action = "dibuat" if result == "created" else "diganti password-nya"
+    def _detail():
+        action = (tr("dibuat", "created") if result == "created" else tr("diganti password-nya", "had its password changed"))
+        return tr(f"User '{username}' {action} di dalam VM {body.vm_id} untuk kredensial grup {group_id}",
+                  f"User '{username}' {action} inside VM {body.vm_id} for the credentials of group {group_id}")
     await log_activity(user, "OS_ACCOUNT_CREATE" if result == "created" else "VM_PASSWORD_RESET", "WARNING",
-                       {"id": body.vm_id, "name": body.host_name},
-                       f"User '{username}' {action} di dalam VM {body.vm_id} untuk kredensial grup {group_id}", request)
+                       {"id": body.vm_id, "name": body.host_name}, both(_detail), request)
 
 
 @router.post("/{group_id}/vms", status_code=201)
@@ -286,8 +294,10 @@ async def add_group_vm(group_id: int, body: VmAccessBody, request: Request, user
             raise HTTPException(status_code=409, detail=tr("VM sudah memiliki akses ke grup ini",
                                                            "The VM already has access in this group"))
     await log_activity(user, "GROUP_VM_ADD", "WARNING", {"id": body.vm_id, "name": body.host_name},
-                       f"{user.get('username')} memberi grup '{group['name']}' akses ke VM {body.vm_id} di "
-                       f"{body.host_name} ({_mode_text(body)})", request)
+                       both(lambda: tr(f"{user.get('username')} memberi grup '{group['name']}' akses ke VM {body.vm_id} di "
+                                       f"{body.host_name} ({_mode_text(body)})",
+                                       f"{user.get('username')} gave the group '{group['name']}' access to VM {body.vm_id} on "
+                                       f"{body.host_name} ({_mode_text(body)})")), request)
     return dict(row)
 
 
@@ -333,8 +343,10 @@ async def update_group_vm_access(group_id: int, body: VmAccessBody, request: Req
             raise HTTPException(404, tr("Akses VM tidak ditemukan di grup ini",
                                         "VM access not found in this group"))
     await log_activity(user, "GROUP_VM_UPDATE", "WARNING", {"id": body.vm_id, "name": body.host_name},
-                       f"{user.get('username')} mengubah akses grup '{group['name']}' ke VM {body.vm_id} di "
-                       f"{body.host_name} ({_mode_text(body)}{', password diganti' if body.os_password else ''})",
+                       both(lambda: tr(f"{user.get('username')} mengubah akses grup '{group['name']}' ke VM {body.vm_id} di "
+                                       f"{body.host_name} ({_mode_text(body)}{', password diganti' if body.os_password else ''})",
+                                       f"{user.get('username')} changed the access of the group '{group['name']}' to VM {body.vm_id} on "
+                                       f"{body.host_name} ({_mode_text(body)}{', password changed' if body.os_password else ''})")),
                        request)
     return dict(result)
 
@@ -354,8 +366,10 @@ async def remove_group_vm(group_id: int, body: VmAccessBody, request: Request, u
             raise HTTPException(status_code=404, detail=tr("Akses VM tidak ditemukan di grup ini",
                                                            "VM access not found in this group"))
     await log_activity(user, "GROUP_VM_REMOVE", "WARNING", {"id": body.vm_id, "name": body.host_name},
-                       f"{user.get('username')} mencabut akses grup '{group['name']}' ke VM {body.vm_id} di "
-                       f"{body.host_name}", request)
+                       both(lambda: tr(f"{user.get('username')} mencabut akses grup '{group['name']}' ke VM {body.vm_id} di "
+                                       f"{body.host_name}",
+                                       f"{user.get('username')} revoked the access of the group '{group['name']}' to VM {body.vm_id} on "
+                                       f"{body.host_name}")), request)
 
 
 # ── User's groups (untuk student melihat grup mereka) ────────────────────────

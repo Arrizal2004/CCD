@@ -195,9 +195,10 @@ async def reveal_vm_password(host_name: str, vm_id: str, request: Request, user:
     if not row or not row["password_enc"]:
         raise HTTPException(status_code=404, detail=tr("Password VM belum tersimpan",
                                                        "No password is stored for this VM"))
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     await log_activity(user, "CRED_VIEW", "WARNING", {"id": vm_id, "name": host_name},
-                       f"{user.get('username')} menampilkan password VM {vm_id} ({host_name})", request)
+                       both(lambda: tr(f"{user.get('username')} menampilkan password VM {vm_id} ({host_name})",
+                                    f"{user.get('username')} viewed the password of VM {vm_id} ({host_name})")), request)
     return {"password": decrypt_secret(row["password_enc"])}
 
 
@@ -221,9 +222,10 @@ async def reset_vm_password(host_name: str, vm_id: str, body: ResetPasswordBody,
 
     await guest_accounts.reset_password(host_name, vm_id, username, password)
     places = await guest_accounts.update_stored_password(host_name, vm_id, username, password)
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     await log_activity(user, "VM_PASSWORD_RESET", "WARNING", {"id": vm_id, "name": host_name},
-                       f"{user.get('username')} mereset password user '{username}' di dalam VM {vm_id} ({host_name})", request)
+                       both(lambda: tr(f"{user.get('username')} mereset password user '{username}' di dalam VM {vm_id} ({host_name})",
+                                    f"{user.get('username')} reset the password of user '{username}' inside VM {vm_id} ({host_name})")), request)
     return {"username": username, "password": password, "updated": places}
 
 
@@ -234,10 +236,11 @@ async def upsert_vm_cred(
     user: dict = Depends(get_current_user)
 ):
     _require_admin(user)
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     await log_activity(user, "CRED_UPDATE", "WARNING",
                        {"id": vm_id, "name": host_name},
-                       f"Update credentials VM {vm_id} ({body.os_type}/{body.cred_type})", request)
+                       both(lambda: tr(f"Update credentials VM {vm_id} ({body.os_type}/{body.cred_type})",
+                                    f"Updated the credentials of VM {vm_id} ({body.os_type}/{body.cred_type})")), request)
     if body.os_type not in ("linux", "windows"):
         raise HTTPException(status_code=400, detail=tr("os_type harus 'linux' atau 'windows'",
                                                        "os_type must be 'linux' or 'windows'"))
@@ -388,7 +391,7 @@ async def create_vm_os_account(
     """Daftarkan akun OS untuk VM ini. Dengan create_in_vm, user-nya sekaligus dibuat di dalam VM lewat
     QEMU Guest Agent; password kosong berarti dibuatkan acak dan dikembalikan sekali di respons."""
     _require_admin(user)
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     username = body.os_username.strip()
     password = body.password
     generated = False
@@ -461,10 +464,11 @@ async def create_vm_os_account(
             vm_id, host_name
         )
 
-    where = " (user dibuat di dalam VM)" if body.create_in_vm else ""
+    def _detail():
+        where = tr(" (user dibuat di dalam VM)", " (user created inside the VM)") if body.create_in_vm else ""
+        return tr(f"Tambah OS account '{username}' untuk VM {vm_id}{where}", f"Added the OS account '{username}' for VM {vm_id}{where}")
     await log_activity(user, "OS_ACCOUNT_CREATE", "WARNING",
-                       {"id": vm_id, "name": host_name},
-                       f"Tambah OS account '{username}' untuk VM {vm_id}{where}", request)
+                       {"id": vm_id, "name": host_name}, both(_detail), request)
 
     if vm_row:
         creds = {
@@ -492,7 +496,7 @@ async def update_vm_os_account(
     request: Request, user: dict = Depends(get_current_user)
 ):
     _require_admin(user)
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     pool = await get_pool()
     async with pool.acquire() as conn:
         existing = await conn.fetchrow(
@@ -529,7 +533,8 @@ async def update_vm_os_account(
 
     await log_activity(user, "OS_ACCOUNT_UPDATE", "WARNING",
                        {"id": vm_id, "name": host_name},
-                       f"Update OS account '{existing['os_username']}' VM {vm_id}", request)
+                       both(lambda: tr(f"Update OS account '{existing['os_username']}' VM {vm_id}",
+                                    f"Updated the OS account '{existing['os_username']}' of VM {vm_id}")), request)
 
     if vm_row and (body.password or body.pkey) and main_cred:
         _os_type = main_cred["os_type"] or "linux"
@@ -553,7 +558,7 @@ async def delete_vm_os_account(
     """Hapus akun OS dari dashboard. Dengan remove_in_vm, user-nya (beserta folder home) ikut dihapus
     dari dalam VM, kecuali user itu masih dipakai untuk Login Connect atau kredensial grup."""
     _require_admin(user)
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     pool = await get_pool()
     async with pool.acquire() as conn:
         acc = await conn.fetchrow(
@@ -580,10 +585,13 @@ async def delete_vm_os_account(
         )
         await conn.execute("DELETE FROM vm_os_accounts WHERE id = $1", account_id)
 
-    where = " (user dan folder home-nya dihapus dari dalam VM)" if removed else ""
+    def _detail():
+        where = (tr(" (user dan folder home-nya dihapus dari dalam VM)", " (the user and its home folder were deleted inside the VM)")
+                 if removed else "")
+        return tr(f"Hapus OS account '{acc['os_username']}' VM {vm_id}{where}",
+                  f"Deleted the OS account '{acc['os_username']}' of VM {vm_id}{where}")
     await log_activity(user, "OS_ACCOUNT_DELETE", "WARNING",
-                       {"id": vm_id, "name": host_name},
-                       f"Hapus OS account '{acc['os_username']}' VM {vm_id}{where}", request)
+                       {"id": vm_id, "name": host_name}, both(_detail), request)
 
     if vm_row:
         asyncio.create_task(delete_os_account_connection(host_name, vm_row["vm_name"], acc["os_username"]))

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from auth import Role, get_current_user
 from services import vm_batches as vb
-from services.audit import log_activity
+from services.audit import both, log_activity
 from i18n import tr
 
 router = APIRouter()
@@ -55,8 +55,10 @@ async def create(body: BatchBody, request: Request, user: dict = Depends(get_cur
     batch_id = await vb.start(body.instance, body.node, body.model_dump(), user)
     batch = await vb.get(batch_id)
     await log_activity(user, "VM_BATCH_CREATE", "WARNING", {"id": str(batch_id), "name": f"{body.instance}/{body.node}"},
-                       f"{user.get('username')} memulai pembuatan {len(batch['items'])} VM untuk grup {batch['group_name']} "
-                       f"dari template {body.template_vmid} di {body.instance}/{body.node}", request)
+                       both(lambda: tr(f"{user.get('username')} memulai pembuatan {len(batch['items'])} VM untuk grup {batch['group_name']} "
+                                       f"dari template {body.template_vmid} di {body.instance}/{body.node}",
+                                       f"{user.get('username')} started creating {len(batch['items'])} VMs for the group {batch['group_name']} "
+                                       f"from template {body.template_vmid} on {body.instance}/{body.node}")), request)
     return batch
 
 
@@ -77,7 +79,8 @@ async def credentials(batch_id: int, request: Request, user: dict = Depends(get_
     _require_admin(user)
     text = await vb.credentials_csv(batch_id)
     await log_activity(user, "CRED_VIEW", "WARNING", {"id": str(batch_id), "name": "vm-batch"},
-                       f"{user.get('username')} mengunduh kredensial VM massal batch #{batch_id}", request)
+                       both(lambda: tr(f"{user.get('username')} mengunduh kredensial VM massal batch #{batch_id}",
+                                       f"{user.get('username')} downloaded the credentials of bulk VM batch #{batch_id}")), request)
     return Response(text, media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": f'attachment; filename="vm-massal-{batch_id}.csv"'})
 
@@ -87,5 +90,6 @@ async def retry(batch_id: int, request: Request, user: dict = Depends(get_curren
     _require_admin(user)
     await vb.retry(batch_id)
     await log_activity(user, "VM_BATCH_RETRY", "INFO", {"id": str(batch_id), "name": "vm-batch"},
-                       f"{user.get('username')} mengulang VM yang gagal di batch #{batch_id}", request)
+                       both(lambda: tr(f"{user.get('username')} mengulang VM yang gagal di batch #{batch_id}",
+                                       f"{user.get('username')} retried the failed VMs of batch #{batch_id}")), request)
     return await vb.get(batch_id)

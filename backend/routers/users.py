@@ -21,7 +21,7 @@ from services.guac_sync import (
     with_retry as guac_retry,
     get_user_token,
 )
-from services.audit import log_activity, _client_ip
+from services.audit import both, log_activity, _client_ip
 from services.login_rate_limit import (
     seconds_locked, record_failure, record_success, clear as clear_login_lock, allow as rate_allow,
 )
@@ -113,7 +113,7 @@ async def login(body: LoginRequest, request: Request):
         await record_failure(body.username)
         await log_activity(
             {"username": body.username, "role": "-"}, "AUTH_LOGIN_FAILED", "WARNING",
-            None, f"Login gagal untuk '{body.username}'", request)
+            None, both(lambda: tr(f"Login gagal untuk '{body.username}'", f"Sign-in failed for '{body.username}'")), request)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=tr("Username atau password salah", "Wrong username or password")
@@ -143,7 +143,7 @@ async def login(body: LoginRequest, request: Request):
     token = create_token(user["id"], user["username"], user["role"], user["password_version"])
     await log_activity(
         {"sub": user["id"], "username": user["username"], "role": user["role"]},
-        "AUTH_LOGIN", "INFO", None, "Login berhasil", request)
+        "AUTH_LOGIN", "INFO", None, both(lambda: tr("Login berhasil", "Signed in")), request)
 
     # Login ke Guacamole sebagai user — non-blocking, gagal tidak menghentikan login. Dengan password
     # sementara dari admin belum ada Connect; token Guacamole diberikan setelah password diganti.
@@ -252,7 +252,7 @@ async def register_student(body: RegisterRequest, request: Request):
     await log_activity(
         {"username": body.username, "role": "student"},
         "AUTH_REGISTER", "INFO", None,
-        f"Registrasi baru: '{body.username}' ({body.full_name})", request
+        both(lambda: tr(f"Registrasi baru: '{body.username}' ({body.full_name})", f"New registration: '{body.username}' ({body.full_name})")), request
     )
 
     asyncio.create_task(guac_retry(
@@ -352,8 +352,9 @@ async def change_password(body: ChangePasswordRequest, request: Request, user: d
 
     await log_activity(
         user, "AUTH_CHANGE_PASSWORD", "INFO", None,
-        f"User '{user.get('username')}' mengganti password"
-        + (" (password sementara dari admin)" if row["must_change_password"] else ""), request
+        both(lambda: tr(f"User '{user.get('username')}' mengganti password", f"User '{user.get('username')}' changed their password")
+             + (tr(" (password sementara dari admin)", " (temporary password from an admin)") if row["must_change_password"] else "")),
+        request
     )
     return {
         "message":      tr("Password berhasil diubah", "Password changed"),
@@ -413,8 +414,10 @@ async def reset_password(user_id: int, request: Request, current: dict = Depends
     asyncio.create_task(_sync_guac())
 
     await log_activity(current, "USER_PASSWORD_RESET", "WARNING", None,
-                       f"{current.get('username')} mereset password akun '{target['username']}'"
-                       + (" (permintaan Lupa password)" if handled != "UPDATE 0" else ""), request)
+                       both(lambda: tr(f"{current.get('username')} mereset password akun '{target['username']}'",
+                                       f"{current.get('username')} reset the password of the account '{target['username']}'")
+                            + (tr(" (permintaan Lupa password)", " (Forgot password request)") if handled != "UPDATE 0" else "")),
+                       request)
     return {"username": target["username"], "password": password, "must_change_password": True}
 
 
@@ -437,7 +440,8 @@ async def _record_help(username: str, message: str, ip: str) -> None:
                 user["id"], message, ip or None)
         await log_activity({"sub": user["id"], "username": user["username"], "role": user["role"]},
                            "AUTH_PASSWORD_HELP", "INFO", None,
-                           f"Permintaan reset password untuk '{user['username']}' dari halaman login", ip=ip)
+                           both(lambda: tr(f"Permintaan reset password untuk '{user['username']}' dari halaman login",
+                                           f"Password reset request for '{user['username']}' from the sign-in page")), ip=ip)
     except Exception:
         import logging
         logging.getLogger("users").exception("password-help: gagal mencatat permintaan")
@@ -492,7 +496,8 @@ async def dismiss_password_help(req_id: int, request: Request, current: dict = D
             """UPDATE password_help_requests SET status = 'dismissed', handled_by = $1, handled_at = NOW()
                WHERE id = $2""", current.get("username"), req_id)
     await log_activity(current, "USER_PASSWORD_HELP_DISMISS", "INFO", None,
-                       f"{current.get('username')} mengabaikan permintaan reset password '{target['username']}'",
+                       both(lambda: tr(f"{current.get('username')} mengabaikan permintaan reset password '{target['username']}'",
+                                       f"{current.get('username')} dismissed the password reset request of '{target['username']}'")),
                        request)
     return {"ok": True}
 
@@ -549,7 +554,8 @@ async def create_user(body: CreateUserRequest, request: Request, user: dict = De
                              op_name="create_user:grant_admin")
     asyncio.create_task(_setup_guac_user())
     await log_activity(user, "USER_CREATE", "CRITICAL" if body.role == Role.SUPERADMIN else "WARNING", None,
-                       f"{user.get('username')} membuat akun '{row['username']}' dengan peran {row['role']}",
+                       both(lambda: tr(f"{user.get('username')} membuat akun '{row['username']}' dengan peran {row['role']}",
+                                       f"{user.get('username')} created the account '{row['username']}' with the role {row['role']}")),
                        request)
     return dict(row)
 
@@ -595,10 +601,13 @@ async def bulk_update(body: BulkRequest, request: Request, current: dict = Depen
                 pass
         asyncio.create_task(guac_retry(sync_user_disabled, r["username"], disabled=not usable,
                                        op_name=f"bulk:{body.action}"))
-    label = {"activate": "mengaktifkan", "deactivate": "menonaktifkan", "clear_expiry": "menghapus masa berlaku",
-             "set_expiry": f"mengatur masa berlaku sampai {body.expires_at:%Y-%m-%d}" if body.expires_at else ""}[body.action]
-    await log_activity(current, "USER_BULK_UPDATE", "WARNING", None,
-                       f"{current.get('username')} {label} {len(rows)} akun", request)
+    def _detail():
+        label = {"activate": tr("mengaktifkan", "activated"), "deactivate": tr("menonaktifkan", "deactivated"),
+                 "clear_expiry": tr("menghapus masa berlaku", "removed the expiry of"),
+                 "set_expiry": (tr(f"mengatur masa berlaku sampai {body.expires_at:%Y-%m-%d}", f"set the expiry to {body.expires_at:%Y-%m-%d} for")
+                                if body.expires_at else "")}[body.action]
+        return tr(f"{current.get('username')} {label} {len(rows)} akun", f"{current.get('username')} {label} {len(rows)} accounts")
+    await log_activity(current, "USER_BULK_UPDATE", "WARNING", None, both(_detail), request)
     return {"updated": len(rows)}
 
 
@@ -725,31 +734,35 @@ async def import_users(body: ImportRequest, request: Request, current: dict = De
     asyncio.create_task(_sync_guac())
     groups_used = sorted({r["group"] for r in results if r["group"]})
     await log_activity(current, "USER_IMPORT", "WARNING", None,
-                       f"{current.get('username')} mengimpor {len(created)} akun"
-                       + (f" ke grup {', '.join(groups_used)}" if groups_used else ""), request)
+                       both(lambda: tr(f"{current.get('username')} mengimpor {len(created)} akun", f"{current.get('username')} imported {len(created)} accounts")
+                            + (tr(f" ke grup {', '.join(groups_used)}", f" into the group {', '.join(groups_used)}") if groups_used else "")),
+                       request)
     return {"created": len(created), "errors": 0, "rows": summary,
             "credentials": [{"username": c["username"], "password": c["password"]} for c in created if c["password"]]}
 
 
 def _fmt_expiry(value) -> str:
-    return value.astimezone(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M WIB") if value else "tanpa batas"
+    return (value.astimezone(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M WIB") if value
+            else tr("tanpa batas", "no limit"))
 
 
-def _describe_changes(old, body) -> list[str]:
-    """Ringkasan perubahan untuk Activity Log. Password tidak disebut di sini (dicatat terpisah)."""
+def _describe_changes(old, body) -> list:
+    """Ringkasan perubahan untuk Activity Log, tiap butir dua bahasa. Password tidak disebut di sini
+    (dicatat terpisah)."""
     out = []
     if body.full_name is not None and body.full_name != (old["full_name"] or ""):
-        out.append(f"nama '{old['full_name'] or ''}' → '{body.full_name}'")
+        out.append(both(lambda: tr(f"nama '{old['full_name'] or ''}' → '{body.full_name}'", f"name '{old['full_name'] or ''}' → '{body.full_name}'")))
     if body.role is not None and body.role != old["role"]:
-        out.append(f"peran {old['role']} → {body.role}")
+        out.append(both(lambda: tr(f"peran {old['role']} → {body.role}", f"role {old['role']} → {body.role}")))
     if body.is_active is not None and body.is_active != old["is_active"]:
-        out.append("diaktifkan" if body.is_active else "dinonaktifkan")
+        out.append(both(lambda: tr("diaktifkan", "activated") if body.is_active else tr("dinonaktifkan", "deactivated")))
     if body.is_verified is not None and body.is_verified != old["is_verified"]:
-        out.append("diverifikasi" if body.is_verified else "verifikasi dicabut")
+        out.append(both(lambda: tr("diverifikasi", "verified") if body.is_verified else tr("verifikasi dicabut", "verification revoked")))
     if body.email is not None and (_clean_email(body.email) or None) != (old["email"] or None):
-        out.append(f"email '{old['email'] or ''}' → '{_clean_email(body.email) or ''}'")
+        out.append(both(lambda: tr(f"email '{old['email'] or ''}' → '{_clean_email(body.email) or ''}'", f"email '{old['email'] or ''}' → '{_clean_email(body.email) or ''}'")))
     if "expires_at" in body.model_fields_set and _aware(body.expires_at) != old["expires_at"]:
-        out.append(f"masa berlaku {_fmt_expiry(old['expires_at'])} → {_fmt_expiry(_aware(body.expires_at))}")
+        out.append(both(lambda: tr(f"masa berlaku {_fmt_expiry(old['expires_at'])} → {_fmt_expiry(_aware(body.expires_at))}",
+                                   f"expiry {_fmt_expiry(old['expires_at'])} → {_fmt_expiry(_aware(body.expires_at))}")))
     return out
 
 
@@ -807,7 +820,8 @@ async def update_user(
         role_change = body.role is not None and body.role != user["role"]
         severity = "CRITICAL" if role_change and Role.SUPERADMIN in (body.role, user["role"]) else "WARNING"
         await log_activity(current, "USER_UPDATE", severity, None,
-                           f"{current.get('username')} mengubah akun '{result['username']}': {'; '.join(changes)}",
+                           both(lambda: tr(f"{current.get('username')} mengubah akun '{result['username']}': {'; '.join(c.t() for c in changes)}",
+                                           f"{current.get('username')} changed the account '{result['username']}': {'; '.join(c.t() for c in changes)}")),
                            request)
     if body.password is not None:
         from routers.guac import disconnect_user
@@ -816,7 +830,8 @@ async def update_user(
         except Exception:
             pass
         await log_activity(current, "USER_PASSWORD_RESET", "WARNING", None,
-                           f"{current.get('username')} mengganti password akun '{result['username']}' lewat Edit",
+                           both(lambda: tr(f"{current.get('username')} mengganti password akun '{result['username']}' lewat Edit",
+                                           f"{current.get('username')} changed the password of the account '{result['username']}' through Edit")),
                            request)
     if "expires_at" in body.model_fields_set and body.password is None and body.is_active is None:
         # Masa berlaku diperpanjang/dihapus: aktifkan lagi akun Guacamole-nya kalau akunnya aktif.
@@ -869,7 +884,8 @@ async def delete_user_endpoint(user_id: int, request: Request, current: dict = D
     forget_account(user_id)
     asyncio.create_task(guac_retry(guac_delete_user, row["username"], op_name="delete_user:guac"))
     await log_activity(current, "USER_DELETE", "WARNING", None,
-                       f"{current.get('username')} menghapus akun '{row['username']}'", request)
+                       both(lambda: tr(f"{current.get('username')} menghapus akun '{row['username']}'",
+                                       f"{current.get('username')} deleted the account '{row['username']}'")), request)
     return {"status": "deleted", "user_id": user_id}
 
 
@@ -877,9 +893,8 @@ async def delete_user_endpoint(user_id: int, request: Request, current: dict = D
 @router.post("/vm-assignments")
 async def assign_vm(body: AssignVmRequest, request: Request, current: dict = Depends(require_sysadmin)):
     """Assign VM ke student, opsional dengan OS account tertentu."""
-    detail = f"Assign VM {body.vm_id} ke user #{body.user_id}"
-    if body.os_account_id:
-        detail += f" (OS account #{body.os_account_id})"
+    detail = both(lambda: tr(f"Assign VM {body.vm_id} ke user #{body.user_id}", f"Assigned VM {body.vm_id} to user #{body.user_id}")
+                  + (f" (OS account #{body.os_account_id})" if body.os_account_id else ""))
     await log_activity(current, "RBAC_ASSIGN_VM", "WARNING",
                        {"id": body.vm_id, "name": body.host_name}, detail, request)
     from services.assignments import assign_vm as do_assign
@@ -909,7 +924,7 @@ async def get_user_assignments(user_id: int, current: dict = Depends(require_sys
 async def remove_assignment(user_id: int, vm_id: str, request: Request, current: dict = Depends(require_sysadmin)):
     await log_activity(current, "RBAC_UNASSIGN_VM", "WARNING",
                        {"id": vm_id, "name": vm_id},
-                       f"Unassign VM {vm_id} dari user #{user_id}", request)
+                       both(lambda: tr(f"Unassign VM {vm_id} dari user #{user_id}", f"Unassigned VM {vm_id} from user #{user_id}")), request)
     await unassign_vm(user_id, vm_id)
     return {"status": "removed"}
 

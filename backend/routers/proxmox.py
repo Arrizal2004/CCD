@@ -45,7 +45,7 @@ from auth import get_current_user, Role
 from database import get_pool, get_student_vm_ids
 from services import proxmox_instances as pve_instances
 from services.proxmox_client import ProxmoxError
-from services.audit import log_activity
+from services.audit import both, log_activity
 from services import proxmox_provision as provision
 from services.vm_credentials import save_vm_credentials
 from services import vm_cleanup
@@ -248,8 +248,10 @@ async def post_instance(body: InstanceCreateRequest, request: Request, user: dic
         body.label, body.host, body.token_id, body.token_secret, body.verify_ssl
     )
     await log_activity(user, "PVE_INSTANCE_ADD", "WARNING", {"id": body.label, "name": body.label},
-                       f"{user.get('username')} menambahkan instance Proxmox '{body.label}' ({body.host}, "
-                       f"token {body.token_id}, verifikasi SSL {'aktif' if body.verify_ssl else 'mati'})", request)
+                       both(lambda: tr(f"{user.get('username')} menambahkan instance Proxmox '{body.label}' ({body.host}, "
+                                       f"token {body.token_id}, verifikasi SSL {'aktif' if body.verify_ssl else 'mati'})",
+                                       f"{user.get('username')} added the Proxmox instance '{body.label}' ({body.host}, "
+                                       f"token {body.token_id}, SSL verification {'on' if body.verify_ssl else 'off'})")), request)
     return created
 
 
@@ -265,16 +267,17 @@ async def put_instance(label: str, body: InstanceUpdateRequest, request: Request
         raise HTTPException(status_code=404, detail=tr("Instance tidak ditemukan", "Instance not found"))
     changes = []
     if body.host is not None and body.host != (old or {}).get("host"):
-        changes.append(f"alamat {(old or {}).get('host')} → {body.host}")
+        changes.append(both(lambda: tr(f"alamat {(old or {}).get('host')} → {body.host}", f"address {(old or {}).get('host')} → {body.host}")))
     if body.token_id is not None and body.token_id != (old or {}).get("token_id"):
-        changes.append(f"token {(old or {}).get('token_id')} → {body.token_id}")
+        changes.append(both(lambda: tr(f"token {(old or {}).get('token_id')} → {body.token_id}", f"token {(old or {}).get('token_id')} → {body.token_id}")))
     if body.token_secret:
-        changes.append("secret token diganti")
+        changes.append(both(lambda: tr("secret token diganti", "token secret changed")))
     if body.verify_ssl is not None and body.verify_ssl != (old or {}).get("verify_ssl"):
-        changes.append(f"verifikasi SSL {'aktif' if body.verify_ssl else 'mati'}")
+        changes.append(both(lambda: tr(f"verifikasi SSL {'aktif' if body.verify_ssl else 'mati'}", f"SSL verification {'on' if body.verify_ssl else 'off'}")))
     if changes:
         await log_activity(user, "PVE_INSTANCE_UPDATE", "WARNING", {"id": label, "name": label},
-                           f"{user.get('username')} mengubah instance Proxmox '{label}': {'; '.join(changes)}", request)
+                           both(lambda: tr(f"{user.get('username')} mengubah instance Proxmox '{label}': {'; '.join(c.t() for c in changes)}",
+                                           f"{user.get('username')} changed the Proxmox instance '{label}': {'; '.join(c.t() for c in changes)}")), request)
     return updated
 
 
@@ -286,7 +289,8 @@ async def delete_instance(label: str, request: Request, user: dict = Depends(get
     if not ok:
         raise HTTPException(status_code=404, detail=tr("Instance tidak ditemukan", "Instance not found"))
     await log_activity(user, "PVE_INSTANCE_DELETE", "CRITICAL", {"id": label, "name": label},
-                       f"{user.get('username')} menghapus instance Proxmox '{label}' ({(old or {}).get('host', '')})",
+                       both(lambda: tr(f"{user.get('username')} menghapus instance Proxmox '{label}' ({(old or {}).get('host', '')})",
+                       f"{user.get('username')} deleted the Proxmox instance '{label}' ({(old or {}).get('host', '')})")),
                        request)
     return {"status": "deleted"}
 
@@ -428,7 +432,8 @@ async def post_vm_action(label: str, node: str, vmid: int, body: VmActionRequest
     try:
         await log_activity(
             user, "VM_ACTION", "INFO", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
-            f"{user.get('username')} menjalankan aksi '{body.action}' pada VM {vmid} di {label}/{node}", None)
+            both(lambda: tr(f"{user.get('username')} menjalankan aksi '{body.action}' pada VM {vmid} di {label}/{node}",
+                                 f"{user.get('username')} ran the action '{body.action}' on VM {vmid} on {label}/{node}")), None)
     except Exception:
         pass
 
@@ -579,7 +584,8 @@ async def put_vm_resources(label: str, node: str, vmid: int, body: VmResourcesRe
     try:
         await log_activity(
             user, "VM_RESIZE", "WARNING", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
-            f"{user.get('username')} mengubah resource VM {vmid} di {label}/{node}: {', '.join(changes)}", request)
+            both(lambda: tr(f"{user.get('username')} mengubah resource VM {vmid} di {label}/{node}: {', '.join(changes)}",
+                           f"{user.get('username')} changed the resources of VM {vmid} on {label}/{node}: {', '.join(changes)}")), request)
     except Exception:
         pass
     return {"status": "updated", "changes": changes}
@@ -615,7 +621,8 @@ async def enable_guest_agent(label: str, node: str, vmid: int, user: dict = Depe
     try:
         await log_activity(
             user, "VM_CONFIG", "INFO", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
-            f"{user.get('username')} mengaktifkan opsi QEMU Guest Agent pada VM {vmid} di {label}/{node}", None)
+            both(lambda: tr(f"{user.get('username')} mengaktifkan opsi QEMU Guest Agent pada VM {vmid} di {label}/{node}",
+                                 f"{user.get('username')} enabled the QEMU Guest Agent option on VM {vmid} on {label}/{node}")), None)
     except Exception:
         pass
     return {"agent_enabled": True, "restart_required": True}
@@ -697,7 +704,8 @@ async def post_snapshot(label: str, node: str, vmid: int, body: SnapshotCreateRe
     try:
         await log_activity(
             user, "VM_SNAPSHOT", "INFO", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
-            f"{user.get('username')} membuat snapshot '{body.snapname}' pada VM {vmid} di {label}/{node}", None)
+            both(lambda: tr(f"{user.get('username')} membuat snapshot '{body.snapname}' pada VM {vmid} di {label}/{node}",
+                                 f"{user.get('username')} created the snapshot '{body.snapname}' on VM {vmid} on {label}/{node}")), None)
     except Exception:
         pass
     return {"upid": upid}
@@ -715,7 +723,8 @@ async def delete_snapshot(label: str, node: str, vmid: int, snapname: str, user:
     try:
         await log_activity(
             user, "VM_SNAPSHOT", "WARNING", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
-            f"{user.get('username')} menghapus snapshot '{snapname}' pada VM {vmid} di {label}/{node}", None)
+            both(lambda: tr(f"{user.get('username')} menghapus snapshot '{snapname}' pada VM {vmid} di {label}/{node}",
+                                 f"{user.get('username')} deleted the snapshot '{snapname}' on VM {vmid} on {label}/{node}")), None)
     except Exception:
         pass
     return {"upid": upid}
@@ -733,7 +742,8 @@ async def rollback_snapshot(label: str, node: str, vmid: int, snapname: str, use
     try:
         await log_activity(
             user, "VM_SNAPSHOT", "WARNING", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
-            f"{user.get('username')} rollback ke snapshot '{snapname}' pada VM {vmid} di {label}/{node}", None)
+            both(lambda: tr(f"{user.get('username')} rollback ke snapshot '{snapname}' pada VM {vmid} di {label}/{node}",
+                                 f"{user.get('username')} rolled back to the snapshot '{snapname}' on VM {vmid} on {label}/{node}")), None)
     except Exception:
         pass
     return {"upid": upid}
@@ -844,11 +854,14 @@ async def create_vm_core(label: str, node: str, body: CreateVmRequest, user: dic
         host_key, str(vm["vmid"]), os_type=vm["os_type"], cred_type="ssh",
         guac_protocol="ssh" if linux else "rdp", ssh_host=ssh_host, ssh_port=22 if linux else 3389,
         username=body.username.strip(), password=body.password, wait_for_guac=True)
+    switch_note = f", switch '{switch['name']}' {ip_cidr}" if switch else ""
     try:
         await log_activity(
             user, "VM_CREATE", "WARNING", {"id": str(vm["vmid"]), "name": f"{label}/{node}/{vm['vmid']}"},
-            f"{user.get('username')} membuat VM {vm['name']} ({vm['vmid']}, {vm['clone']} clone) dari template "
-            f"{body.template_vmid} di {label}/{node}" + (f", switch '{switch['name']}' {ip_cidr}" if switch else ""), request)
+            both(lambda: tr(f"{user.get('username')} membuat VM {vm['name']} ({vm['vmid']}, {vm['clone']} clone) dari template "
+                            f"{body.template_vmid} di {label}/{node}{switch_note}",
+                            f"{user.get('username')} created VM {vm['name']} ({vm['vmid']}, {vm['clone']} clone) from template "
+                            f"{body.template_vmid} on {label}/{node}{switch_note}")), request)
     except Exception:
         pass
     return {**vm, "agent_ip": agent_ip, "connect_ready": bool(ssh_host), "switch": switch["name"] if switch else None}
@@ -891,11 +904,14 @@ async def put_vm_lease(label: str, node: str, vmid: int, body: LeaseRequest, req
             """UPDATE vms SET lease_until = $3,
                    lease_enforced_at = CASE WHEN $3::timestamptz IS NULL OR $3 > NOW() THEN NULL ELSE lease_enforced_at END
                WHERE vm_id = $1 AND host_name = $2""", str(vmid), host_key, new)
-    before = row["lease_until"].strftime("%Y-%m-%d %H:%M") if row["lease_until"] else "tanpa batas"
-    after = new.strftime("%Y-%m-%d %H:%M") if new else "tanpa batas"
+    def _detail():
+        none = tr("tanpa batas", "no limit")
+        before = row["lease_until"].strftime("%Y-%m-%d %H:%M") if row["lease_until"] else none
+        after = new.strftime("%Y-%m-%d %H:%M") if new else none
+        return tr(f"{user.get('username')} mengubah masa sewa VM {row['vm_name']} (CCD-{row['ccd_id']:04d}): {before} -> {after} UTC",
+                  f"{user.get('username')} changed the lease of VM {row['vm_name']} (CCD-{row['ccd_id']:04d}): {before} -> {after} UTC")
     await log_activity(user, "VM_LEASE_UPDATE", "INFO", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
-                       f"{user.get('username')} mengubah masa sewa VM {row['vm_name']} (CCD-{row['ccd_id']:04d}): "
-                       f"{before} -> {after} UTC", request)
+                       both(_detail), request)
     return {"lease_until": new.isoformat() if new else None}
 
 
@@ -928,7 +944,8 @@ async def delete_vm(label: str, node: str, vmid: int, confirm_name: str, request
     try:
         await log_activity(
             user, "VM_DELETE", "CRITICAL", {"id": str(vmid), "name": f"{label}/{node}/{vmid}"},
-            f"{user.get('username')} menghapus VM {result['name']} ({vmid}) di {label}/{node}", request)
+            both(lambda: tr(f"{user.get('username')} menghapus VM {result['name']} ({vmid}) di {label}/{node}",
+                           f"{user.get('username')} deleted VM {result['name']} ({vmid}) on {label}/{node}")), request)
     except Exception:
         pass
     return {**result, "guacamole_connections_removed": guac_removed, "guacamole_error": guac_error,

@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from auth import get_current_user, Role
 from database import get_pool, get_student_vm_ids
-from services.audit import log_activity
+from services.audit import both, log_activity
 from services.ssh_audit import handle_lines
 from i18n import tr
 
@@ -213,7 +213,7 @@ async def add_key(body: KeyBody, request: Request, user: dict = Depends(get_curr
                VALUES ($1, $2, $3, $4, $5) RETURNING id, name, key_type, fingerprint, created_at, last_used_at""",
             uid, name, ktype, normalized, fp)
     await log_activity(user, "SSH_KEY_ADD", "INFO", {"id": fp, "name": name},
-                       f"{user.get('username')} menambahkan SSH key {name} ({fp})", request)
+                       both(lambda: tr(f"{user.get('username')} menambahkan SSH key {name} ({fp})", f"{user.get('username')} added the SSH key {name} ({fp})")), request)
     return dict(row)
 
 
@@ -227,7 +227,8 @@ async def delete_key(key_id: int, request: Request, user: dict = Depends(get_cur
     if not row:
         raise HTTPException(404, tr("SSH key tidak ditemukan", "SSH key not found"))
     await log_activity(user, "SSH_KEY_DELETE", "WARNING", {"id": row["fingerprint"], "name": row["name"]},
-                       f"{user.get('username')} menghapus SSH key {row['name']} ({row['fingerprint']})", request)
+                       both(lambda: tr(f"{user.get('username')} menghapus SSH key {row['name']} ({row['fingerprint']})",
+                                    f"{user.get('username')} deleted the SSH key {row['name']} ({row['fingerprint']})")), request)
     return {"status": "deleted"}
 
 
@@ -258,7 +259,8 @@ async def _log_key_denied(row, reason: str, client: str) -> None:
         ip = ""
     await log_activity({"sub": row["uid"], "username": row["username"], "role": row["role"]},
                        "SSH_DENIED", "WARNING", {"id": row["fingerprint"], "name": row["name"]},
-                       f"Key SSH {row['name']} milik {row['username']} ditolak bastion: {reason}", ip=ip)
+                       both(lambda: tr(f"Key SSH {row['name']} milik {row['username']} ditolak bastion: {reason.t()}",
+                                       f"SSH key {row['name']} of {row['username']} was rejected by the bastion: {reason.t()}")), ip=ip)
 
 
 @router.get("/authorized", response_class=PlainTextResponse)
@@ -278,15 +280,15 @@ async def authorized_keys(request: Request, fingerprint: str = Query(..., max_le
             return ""
         targets = []
         if not row["is_active"] or row["deleted_at"] is not None:
-            reason = "akun nonaktif"
+            reason = both(lambda: tr("akun nonaktif", "account is inactive"))
         elif row["expired"]:
-            reason = "masa berlaku akun habis"
+            reason = both(lambda: tr("masa berlaku akun habis", "the account has expired"))
         elif row["role"] == Role.STUDENT and not row["is_verified"]:
-            reason = "akun belum diverifikasi"
+            reason = both(lambda: tr("akun belum diverifikasi", "the account is not verified"))
         else:
             targets = await allowed_targets(row["uid"], row["role"])
             # Tanpa permitopen, port-forwarding akan terbuka ke mana saja: tolak.
-            reason = "" if targets else "tidak ada VM yang bisa diakses lewat SSH"
+            reason = "" if targets else both(lambda: tr("tidak ada VM yang bisa diakses lewat SSH", "no VM can be reached through SSH"))
         if reason:
             await _log_key_denied(row, reason, client)
             return ""

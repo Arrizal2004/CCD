@@ -75,6 +75,9 @@ const STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
 
 // Nama VM dan CCDID. Admin juga melihat VMID dan host-nya, karena VMID hanya unik per Proxmox.
 // Tiket lama tanpa CCDID tetap menampilkan VMID.
+// Pesan sistem tersimpan dalam dua bahasa; yang lain hanya satu (ditulis pengguna).
+const msgText = (m) => (currentLang() === 'en' && m.message_en ? m.message_en : m.message);
+
 function vmLabel(t, isAdmin) {
     const parts = [t.vm_snapshot?.vm_name, t.ccd_id != null ? formatCcdId(t.ccd_id) : null];
     if (t.vm_id && (isAdmin || t.ccd_id == null)) {
@@ -413,7 +416,7 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                 if (m.type === 'message') {
                     setMessages(prev => prev.some(x => x.id === m.id) ? prev : [...prev, {
                         id: m.id, sender_id: m.sender_id, sender_role: m.sender_role,
-                        sender_name: m.sender_name, message: m.message, timestamp: m.timestamp,
+                        sender_name: m.sender_name, message: m.message, message_en: m.message_en, timestamp: m.timestamp,
                         attachment_url: m.attachment_url || null,
                         attachment_name: m.attachment_name || null,
                     }]);
@@ -548,7 +551,7 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                                     return (
                                         <div key={m.id} style={{ alignSelf: 'center', maxWidth: '90%', textAlign: 'center' }}>
                                             <span style={{ fontSize: 10, fontFamily: 'var(--fmono)', color: 'var(--text3)', background: 'var(--bg-hover)', border: '1px solid var(--border)', borderRadius: 10, padding: '3px 10px' }}>
-                                                {m.message} · {fmt(m.timestamp)}
+                                                {msgText(m)} · {fmt(m.timestamp)}
                                             </span>
                                         </div>
                                     );
@@ -566,7 +569,7 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                                             padding: '8px 12px', borderRadius: 10, fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
                                             background: staff ? 'var(--cyan-glow, #00e5ff18)' : 'var(--bg-hover)', border: `1px solid ${staff ? 'var(--cyan)44' : 'var(--border)'}`
                                         }}>
-                                            {m.message && <div>{m.message}</div>}
+                                            {m.message && <div>{msgText(m)}</div>}
                                             {m.attachment_url && (
                                                 <div style={{ marginTop: m.message ? 8 : 0 }}>
                                                     {isImage ? (

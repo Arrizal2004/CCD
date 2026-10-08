@@ -466,3 +466,63 @@ def test_csv_cells_cannot_become_formulas():
     assert _cell("budi") == "budi" and _cell(None) == "" and _cell(["a", "b"]) == "a, b" and _cell(5) == "5"
     assert fmt_time(datetime(2026, 10, 7, 0, 30, tzinfo=timezone.utc)) == "2026-10-07 07:30:00"
     assert fmt_time(1_759_797_000_000) == "2025-10-07 07:30:00"
+
+
+# ── Detail Activity Log mengikuti bahasa admin ────────────────────────────────
+
+def _detail_in(client, token, lang, action, needle):
+    r = client.get(f"{A}/audit-logs", params={"action": action, "search": needle, "page_size": 20},
+                   headers={**auth(token), "Accept-Language": lang})
+    return [i["detail"] for i in r.json()["items"]]
+
+
+def test_audit_detail_follows_the_viewer_language(client, superadmin_token):
+    name = f"tst-bahasa-{_uid()}"
+    g = client.post("/api/v1/groups", json={"name": name}, headers=auth(superadmin_token)).json()
+    client.put(f"/api/v1/groups/{g['id']}", json={"name": name + "-b", "description": "x"}, headers=auth(superadmin_token))
+    assert client.delete(f"/api/v1/groups/{g['id']}", headers=auth(superadmin_token)).status_code == 204
+
+    assert _detail_in(client, superadmin_token, "id", "GROUP_CREATE", name)[0].endswith(f"membuat grup '{name}'")
+    assert _detail_in(client, superadmin_token, "en", "GROUP_CREATE", name)[0].endswith(f"created the group '{name}'")
+    # Daftar perubahan di dalam kalimat ikut berganti bahasa, nama yang diketik pengguna tidak.
+    en = _detail_in(client, superadmin_token, "en", "GROUP_UPDATE", name)[0]
+    idn = _detail_in(client, superadmin_token, "id", "GROUP_UPDATE", name)[0]
+    assert "changed the group" in en and f"name '{name}' → '{name}-b'" in en and "description changed" in en
+    assert "mengubah grup" in idn and f"nama '{name}' → '{name}-b'" in idn and "deskripsi diubah" in idn
+    # Pencarian menemukan kata dari kedua bahasa.
+    r = client.get(f"{A}/audit-logs", params={"search": "deleted the group", "page_size": 50}, headers=auth(superadmin_token))
+    assert any(name in i["detail"] for i in r.json()["items"])
+    assert any(name in i["detail"] for i in client.get(f"{A}/audit-logs", params={"search": "menghapus grup", "page_size": 50},
+                                                         headers=auth(superadmin_token)).json()["items"])
+
+
+def test_old_rows_without_english_fall_back_to_indonesian(client, superadmin_token):
+    marker = f"catatan-lama-{_uid()}"
+    _run(_sql("INSERT INTO audit_logs (username, action_type, severity_level, detail_message) VALUES ('tst_lama', 'TEST_OLD', 'INFO', $1)", marker))
+    assert _detail_in(client, superadmin_token, "en", "TEST_OLD", marker) == [marker]
+    assert _detail_in(client, superadmin_token, "id", "TEST_OLD", marker) == [marker]
+    _run(_sql("UPDATE audit_logs SET detail_en = $2 WHERE detail_message = $1", marker, "old row in English"))
+    assert _detail_in(client, superadmin_token, "en", "TEST_OLD", marker) == ["old row in English"]
+    assert _detail_in(client, superadmin_token, "id", "TEST_OLD", marker) == [marker]
+
+
+def test_audit_csv_uses_the_viewer_language(client, superadmin_token):
+    name = f"tst-csv-{_uid()}"
+    client.post("/api/v1/groups", json={"name": name}, headers=auth(superadmin_token))
+    def export(lang):
+        r = client.get(f"{A}/audit-logs/export", params={"search": name}, headers={**auth(superadmin_token), "Accept-Language": lang})
+        return list(csv.reader(io.StringIO(r.content.decode("utf-8-sig"))))[1][5]
+    assert export("en").endswith(f"created the group '{name}'") and export("id").endswith(f"membuat grup '{name}'")
+
+
+def test_ticket_system_message_has_both_languages(client, student_token, sysadmin_token):
+    t = client.post("/api/tickets", headers=auth(student_token), json={"title": "uji pesan sistem"}).json()
+    assert client.patch(f"/api/tickets/{t['id']}/status", headers=auth(sysadmin_token), json={"status": "IN_PROGRESS"}).status_code == 200
+    msgs = client.get(f"/api/tickets/{t['id']}", headers=auth(student_token)).json()["messages"]
+    system = next(m for m in msgs if m["sender_role"] == "system")
+    assert system["message"] == "Status diubah ke IN_PROGRESS oleh tst_sysadmin (sysadmin)"
+    assert system["message_en"] == "Status changed to IN_PROGRESS by tst_sysadmin (sysadmin)"
+    human = client.post(f"/api/tickets/{t['id']}/messages", headers=auth(student_token), json={"message": "halo"})
+    assert human.status_code == 200
+    again = client.get(f"/api/tickets/{t['id']}", headers=auth(student_token)).json()["messages"]
+    assert [m["message_en"] for m in again if m["sender_role"] != "system"] == [None]       # pesan pengguna tidak diterjemahkan

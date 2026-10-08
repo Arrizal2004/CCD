@@ -14,7 +14,8 @@ import logging
 
 from database import get_pool
 from services import proxmox_instances as pve_instances
-from services.audit import log_activity
+from i18n import tr
+from services.audit import both, log_activity
 
 log = logging.getLogger("lifecycle")
 
@@ -44,7 +45,8 @@ async def expire_accounts() -> int:
                                        op_name="lifecycle:expire_account"))
         await log_activity({"sub": r["id"], "username": r["username"], "role": r["role"]},
                            "ACCOUNT_EXPIRED", "WARNING", None,
-                           f"Masa berlaku akun {r['username']} habis ({r['expires_at']:%Y-%m-%d %H:%M} UTC); login ditolak")
+                           both(lambda: tr(f"Masa berlaku akun {r['username']} habis ({r['expires_at']:%Y-%m-%d %H:%M} UTC); login ditolak",
+                                           f"The account {r['username']} expired ({r['expires_at']:%Y-%m-%d %H:%M} UTC); sign-in refused")))
     return len(rows)
 
 
@@ -70,9 +72,13 @@ async def enforce_leases() -> int:
         async with pool.acquire() as conn:
             await conn.execute("UPDATE vms SET lease_enforced_at = NOW() WHERE vm_id = $1 AND host_name = $2",
                                r["vm_id"], r["host_name"])
-        what = "dimatikan otomatis" if status == "running" else "sudah dalam keadaan mati"
+        def _detail():
+            what = (tr("dimatikan otomatis", "was shut down automatically") if status == "running"
+                    else tr("sudah dalam keadaan mati", "was already off"))
+            return tr(f"Masa sewa VM {r['vm_name']} (CCD-{r['ccd_id']:04d}) habis; VM {what}",
+                      f"The lease of VM {r['vm_name']} (CCD-{r['ccd_id']:04d}) expired; the VM {what}")
         await log_activity(None, "VM_LEASE_EXPIRED", "WARNING", {"id": r["vm_id"], "name": f"{label}/{node}/{vmid}"},
-                           f"Masa sewa VM {r['vm_name']} (CCD-{r['ccd_id']:04d}) habis; VM {what}")
+                           both(_detail))
         done += 1
     return done
 

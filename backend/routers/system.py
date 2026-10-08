@@ -17,7 +17,7 @@ from fastapi.responses import Response
 
 from auth import get_current_user, require_superadmin
 from services import system_settings as ss
-from services.audit import log_activity
+from services.audit import both, log_activity
 from i18n import tr
 
 router = APIRouter()
@@ -64,7 +64,8 @@ async def put_settings(body: dict, request: Request, user: dict = Depends(requir
     changed = [k for k in ss.DEFAULTS if before.get(k) != after.get(k)]
     if changed:
         await log_activity(user, "SYSTEM_SETTINGS_UPDATE", "WARNING", {"id": "system", "name": after["name"]},
-                           f"{user.get('username')} mengubah pengaturan sistem: {', '.join(changed)}", request)
+                           both(lambda: tr(f"{user.get('username')} mengubah pengaturan sistem: {', '.join(changed)}",
+                       f"{user.get('username')} changed the system settings: {', '.join(changed)}")), request)
     return _with_ssh_env(after)
 
 
@@ -84,8 +85,10 @@ async def put_ticket_categories(body: CategoriesBody, request: Request, user: di
     except ValueError as e:
         raise HTTPException(400, str(e))
     await log_activity(user, "TICKET_CATEGORIES_UPDATE", "INFO", {"id": "system", "name": after["name"]},
-                       f"{user.get('username')} mengubah kategori helpdesk: "
-                       f"{', '.join(c['label'] or c['key'] for c in after['ticket_categories'])}", request)
+                       both(lambda: tr(f"{user.get('username')} mengubah kategori helpdesk: "
+                                       f"{', '.join(c['label'] or c['key'] for c in after['ticket_categories'])}",
+                                       f"{user.get('username')} changed the helpdesk categories: "
+                                       f"{', '.join(c['label'] or c['key'] for c in after['ticket_categories'])}")), request)
     return {"ticket_categories": after["ticket_categories"]}
 
 
@@ -97,7 +100,8 @@ async def put_os_options(body: OsOptionsBody, request: Request, user: dict = Dep
     except ValueError as e:
         raise HTTPException(400, str(e))
     await log_activity(user, "OS_OPTIONS_UPDATE", "INFO", {"id": "system", "name": after["name"]},
-                       f"{user.get('username')} mengubah pilihan OS Infra Request: {', '.join(after['vps_os_options'])}",
+                       both(lambda: tr(f"{user.get('username')} mengubah pilihan OS Infra Request: {', '.join(after['vps_os_options'])}",
+                       f"{user.get('username')} changed the infrastructure request OS choices: {', '.join(after['vps_os_options'])}")),
                        request)
     return {"vps_os_options": after["vps_os_options"], "os_logos": _os_logo_map(after)}
 
@@ -119,7 +123,8 @@ async def upload_os_logo(request: Request, name: str = Query(..., max_length=40)
                                     "The logo must be PNG, JPG or WebP"))
     await ss.save_os_logo(option, data, mime)
     await log_activity(user, "OS_LOGO_UPDATE", "INFO", {"id": "system", "name": option},
-                       f"{user.get('username')} mengganti logo OS {option} ({mime}, {len(data) // 1024} KB)", request)
+                       both(lambda: tr(f"{user.get('username')} mengganti logo OS {option} ({mime}, {len(data) // 1024} KB)",
+                       f"{user.get('username')} changed the logo of OS {option} ({mime}, {len(data) // 1024} KB)")), request)
     return {"os_logos": _os_logo_map(await ss.get_settings())}
 
 
@@ -128,7 +133,7 @@ async def remove_os_logo(request: Request, name: str = Query(..., max_length=40)
     option = ss.match_os(await ss.get_settings(), name) or name
     if await ss.delete_os_logo(option):
         await log_activity(user, "OS_LOGO_UPDATE", "INFO", {"id": "system", "name": option},
-                           f"{user.get('username')} menghapus logo OS {option}", request)
+                           both(lambda: tr(f"{user.get('username')} menghapus logo OS {option}", f"{user.get('username')} removed the logo of OS {option}")), request)
     return {"status": "deleted"}
 
 
@@ -181,7 +186,8 @@ async def upload_logo(request: Request, file: UploadFile = File(...), user: dict
                                     "The logo must be PNG, JPG or WebP"))
     s = await ss.save_logo(data, mime)
     await log_activity(user, "SYSTEM_LOGO_UPDATE", "WARNING", {"id": "system", "name": s["name"]},
-                       f"{user.get('username')} mengganti logo sistem ({mime}, {len(data) // 1024} KB)", request)
+                       both(lambda: tr(f"{user.get('username')} mengganti logo sistem ({mime}, {len(data) // 1024} KB)",
+                       f"{user.get('username')} changed the system logo ({mime}, {len(data) // 1024} KB)")), request)
     return {"logo_version": s["logo_version"]}
 
 
@@ -189,5 +195,5 @@ async def upload_logo(request: Request, file: UploadFile = File(...), user: dict
 async def delete_logo(request: Request, user: dict = Depends(require_superadmin)):
     s = await ss.save_logo(None, None)
     await log_activity(user, "SYSTEM_LOGO_UPDATE", "WARNING", {"id": "system", "name": s["name"]},
-                       f"{user.get('username')} menghapus logo sistem", request)
+                       both(lambda: tr(f"{user.get('username')} menghapus logo sistem", f"{user.get('username')} removed the system logo")), request)
     return {"logo_version": None}

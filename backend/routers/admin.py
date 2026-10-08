@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from auth import require_sysadmin, Role
 from database import get_pool
-from services.audit import query_logs, log_activity, action_types, failed_logins
+from services.audit import query_logs, log_activity, action_types, failed_logins, both
 from services.csv_export import csv_response, fmt_time, MAX_ROWS
 from services import account_block, remote_history
 from services import system_settings as ss
@@ -77,7 +77,8 @@ async def export_audit_logs(
     filters = _audit_filters(search, severity, start, end, action, username)
     data = await query_logs(limit=MAX_ROWS, offset=0, **filters)
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
-                       f"{user.get('username')} mengekspor {len(data['items'])} baris Activity Log ke CSV", request)
+                       both(lambda: tr(f"{user.get('username')} mengekspor {len(data['items'])} baris Activity Log ke CSV",
+                       f"{user.get('username')} exported {len(data['items'])} activity log rows to CSV")), request)
     header = [tr(f"Waktu ({tzn})", f"Time ({tzn})"), "User", tr("Peran", "Role"), tr("Aksi", "Action"),
               tr("Tingkat", "Severity"), "Detail", "Server", "IP"]
     rows = ([fmt_time(i["timestamp"], tz), i["username"], i["user_role"], i["action_type"], i["severity"],
@@ -175,17 +176,21 @@ async def kill_remote_session(body: KillReq, request: Request, user: dict = Depe
         raise HTTPException(500, tr("Guacamole menolak terminasi sesi",
                                     "Guacamole refused to terminate the session"))
 
-    where = f"VM {vm}" + (f" (akun OS {sess.get('os_account')})" if sess.get("os_account") else "") + \
-            (f" di {host}" if host else "")
-    detail = f"{user.get('username')} memutus sesi Remote '{who}' ke {where}"
+    def _where():
+        os_account = sess.get("os_account")
+        return (f"VM {vm}" + (tr(f" (akun OS {os_account})", f" (OS account {os_account})") if os_account else "")
+                + (tr(f" di {host}", f" on {host}") if host else ""))
+    detail = both(lambda: tr(f"{user.get('username')} memutus sesi Remote '{who}' ke {_where()}",
+                             f"{user.get('username')} disconnected the Remote session of '{who}' to {_where()}")
+                  + (tr(" dan mencabut penugasan VM tersebut", " and revoked that VM assignment") if assignment else ""))
     result = {"status": "killed", "active_id": body.active_id, "block": body.block}
     if assignment:
         from routers.users import unassign_vm
         await unassign_vm(*assignment)
-        detail += " dan mencabut penugasan VM tersebut"
     await log_activity(user, "REMOTE_KILL", "WARNING", {"id": vm, "name": host or vm}, detail, request)
     if target:
-        result["sessions"] = await account_block.lock_out(user, target, request, f"dari sesi Remote ke {where}")
+        result["sessions"] = await account_block.lock_out(
+            user, target, request, both(lambda: tr(f"dari sesi Remote ke {_where()}", f"from the Remote session to {_where()}")))
     return result
 
 
@@ -216,7 +221,8 @@ async def guac_grant_all_admins(request: Request, user: dict = Depends(require_s
         raise HTTPException(502, tr(f"Gagal sync Guacamole: {e}", f"Guacamole sync failed: {e}"))
     ok = sum(1 for v in results.values() if v == "ok")
     await log_activity(user, "GUAC_GRANT_ADMINS", "WARNING", None,
-                       f"{user.get('username')} memberi akses semua koneksi Guacamole ke {ok} akun admin", request)
+                       both(lambda: tr(f"{user.get('username')} memberi akses semua koneksi Guacamole ke {ok} akun admin",
+                       f"{user.get('username')} granted access to every Guacamole connection to {ok} admin accounts")), request)
     return {"granted": results}
 
 
@@ -247,7 +253,8 @@ async def export_remote_history(
     tzn = tz.key
     data = await remote_history.history(MAX_ROWS, 0, search.strip(), username.strip())
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
-                       f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat Remote ke CSV", request)
+                       both(lambda: tr(f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat Remote ke CSV",
+                       f"{user.get('username')} exported {len(data['items'])} Remote history rows to CSV")), request)
     header = ["User", "VM", tr("Akun OS", "OS account"), "Host", tr("Protokol", "Protocol"),
               tr("IP Klien", "Client IP"), tr(f"Mulai ({tzn})", f"Start ({tzn})"), tr(f"Selesai ({tzn})", f"End ({tzn})"),
               tr("Durasi (detik)", "Duration (seconds)")]
@@ -285,7 +292,8 @@ async def export_openweb_history(request: Request, username: str = Query("", max
     from routers.openweb import list_sessions
     data = await list_sessions(active_only=False, limit=MAX_ROWS, offset=0, username=username.strip())
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
-                       f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat Open Web ke CSV", request)
+                       both(lambda: tr(f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat Open Web ke CSV",
+                       f"{user.get('username')} exported {len(data['items'])} Open Web history rows to CSV")), request)
     header = ["User", tr("Peran", "Role"), tr("Tujuan", "Target"), tr(f"Dibuat ({tzn})", f"Created ({tzn})"),
               tr(f"Berlaku s/d ({tzn})", f"Valid until ({tzn})"), tr(f"Akses terakhir ({tzn})", f"Last access ({tzn})"),
               "Request", tr("IP Pengakses", "Accessed from"), "Status", tr("Dicabut oleh", "Revoked by")]
@@ -321,13 +329,15 @@ async def openweb_kill(body: OpenWebKillReq, request: Request, user: dict = Depe
     await log_activity(
         user, "OPENWEB_KILL", "WARNING",
         {"id": row["target_ip"], "name": row["target_ip"]},
-        f"{user.get('username')} mencabut sesi Open Web {row['username']} -> {row['target_ip']} ({body.session_id[:8]})",
+        both(lambda: tr(f"{user.get('username')} mencabut sesi Open Web {row['username']} -> {row['target_ip']} ({body.session_id[:8]})",
+                        f"{user.get('username')} revoked the Open Web session {row['username']} -> {row['target_ip']} ({body.session_id[:8]})")),
         request,
     )
     result = {"status": "revoked", "session_id": body.session_id, "block": body.block}
     if target:
-        result["sessions"] = await account_block.lock_out(user, target, request,
-                                                          f"dari link Open Web ke {row['target_ip']}")
+        result["sessions"] = await account_block.lock_out(
+            user, target, request, both(lambda: tr(f"dari link Open Web ke {row['target_ip']}",
+                                                   f"from the Open Web link to {row['target_ip']}")))
     return result
 
 
@@ -359,7 +369,8 @@ async def export_ssh_history(request: Request, username: str = Query("", max_len
     from services.ssh_audit import list_sessions
     data = await list_sessions(active_only=False, limit=MAX_ROWS, offset=0, username=username.strip())
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
-                       f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat SSH ke CSV", request)
+                       both(lambda: tr(f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat SSH ke CSV",
+                       f"{user.get('username')} exported {len(data['items'])} SSH history rows to CSV")), request)
     header = ["User", tr("Peran", "Role"), tr("Dari IP", "From IP"), "Key", "Fingerprint", tr("Tujuan", "Targets"),
               tr("Ditolak", "Denied"), tr(f"Mulai ({tzn})", f"Start ({tzn})"), tr(f"Selesai ({tzn})", f"End ({tzn})"),
               tr("Durasi (detik)", "Duration (seconds)"), tr("Data terkirim (byte)", "Bytes sent"),
@@ -401,13 +412,16 @@ async def ssh_kill_session(body: SshKillReq, request: Request, user: dict = Depe
                                     "The bastion did not answer the disconnect request. Make sure the bastion "
                                     "container runs the latest version "
                                     "(docker compose --profile ssh up -d --build bastion)."))
-    who = sess["username"] or tr("(key tidak terdaftar)", "(unregistered key)")
+    def _detail():
+        who = sess["username"] or tr("(key tidak terdaftar)", "(unregistered key)")
+        return tr(f"{user.get('username')} memutus sesi SSH '{who}' dari {sess['client_ip']} di bastion",
+                  f"{user.get('username')} disconnected the SSH session of '{who}' from {sess['client_ip']} at the bastion")
     await log_activity(user, "SSH_KILL", "WARNING", {"id": str(sess["id"]), "name": sess["client_ip"]},
-                       f"{user.get('username')} memutus sesi SSH '{who}' dari {sess['client_ip']} di bastion",
-                       request)
+                       both(_detail), request)
     result = {"status": "killed", "session_id": sess["id"], "block": body.block}
     if target:
-        result["sessions"] = await account_block.lock_out(user, target, request, "dari sesi SSH di bastion")
+        result["sessions"] = await account_block.lock_out(
+            user, target, request, both(lambda: tr("dari sesi SSH di bastion", "from the SSH session at the bastion")))
     return result
 
 

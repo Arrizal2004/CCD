@@ -38,7 +38,7 @@ async def _auth_flexible(
         raise HTTPException(401, tr("Belum login", "Not authenticated"),
                             headers={"WWW-Authenticate": "Bearer"})
     return await verify_token(raw)  # raises 401 on expired / invalid
-from services.audit import log_activity
+from services.audit import both, log_activity
 
 router = APIRouter()
 log = logging.getLogger("tickets")
@@ -223,16 +223,22 @@ def _ticket_row(r) -> dict:
     }
 
 
-async def _system_msg(conn, ticket_id: int, text: str) -> dict:
-    """Sisipkan pesan sistem (perubahan status, dll) ke thread chat & kembalikan payload broadcast."""
+def _status_changed(status: str, user: dict):
+    return both(lambda: tr(f"Status diubah ke {status} oleh {user.get('username')} ({user.get('role')})",
+                           f"Status changed to {status} by {user.get('username')} ({user.get('role')})"))
+
+
+async def _system_msg(conn, ticket_id: int, text) -> dict:
+    """Sisipkan pesan sistem (perubahan status, dll) ke thread chat & kembalikan payload broadcast.
+    `text` dua bahasa (services.audit.both); pembaca memilih sesuai bahasanya lewat message_en."""
     row = await conn.fetchrow(
-        """INSERT INTO ticket_messages (ticket_id, sender_id, sender_role, sender_name, message)
-           VALUES ($1, NULL, 'system', 'System', $2) RETURNING id, created_at""",
-        ticket_id, text)
+        """INSERT INTO ticket_messages (ticket_id, sender_id, sender_role, sender_name, message, message_en)
+           VALUES ($1, NULL, 'system', 'System', $2, $3) RETURNING id, created_at""",
+        ticket_id, str(text), getattr(text, "en", None))
     return {
         "type": "message", "id": row["id"], "sender_id": None,
         "sender_role": "system", "sender_name": "System",
-        "message": text, "timestamp": row["created_at"].isoformat(),
+        "message": str(text), "message_en": getattr(text, "en", None), "timestamp": row["created_at"].isoformat(),
     }
 
 
@@ -280,7 +286,7 @@ async def create_ticket(body: CreateTicket, request: Request, user: dict = Depen
         await conn.execute("UPDATE tickets SET ticket_number = $2 WHERE id = $1", tid, number)
     await log_activity(user, "TICKET_CREATE", "INFO",
                        {"id": vm_id, "name": number},
-                       f"Tiket {number} dibuat: {body.title.strip()}", request)
+                       both(lambda: tr(f"Tiket {number} dibuat: {body.title.strip()}", f"Ticket {number} created: {body.title.strip()}")), request)
     return {"id": tid, "ticket_number": number, "status": "OPEN"}
 
 
@@ -338,7 +344,7 @@ async def get_ticket(ticket_id: int, user: dict = Depends(get_current_user)):
         "messages": [
             {
                 "id": m["id"], "sender_id": m["sender_id"], "sender_role": m["sender_role"],
-                "sender_name": m["sender_name"], "message": m["message"],
+                "sender_name": m["sender_name"], "message": m["message"], "message_en": m["message_en"],
                 "timestamp": m["created_at"].isoformat(),
                 "attachment_url":  m["attachment_url"],
                 "attachment_name": m["attachment_name"],
@@ -499,13 +505,12 @@ async def update_status(ticket_id: int, body: StatusUpdate, request: Request, us
             await conn.execute(
                 "UPDATE tickets SET status = $2, closed_at = NULL, updated_at = NOW() WHERE id = $1",
                 ticket_id, body.status)
-        sysmsg = await _system_msg(
-            conn, ticket_id,
-            f"Status diubah ke {body.status} oleh {user.get('username')} ({user.get('role')})")
+        sysmsg = await _system_msg(conn, ticket_id, _status_changed(body.status, user))
     sev = "WARNING" if body.status in ("RESOLVED", "CLOSED") else "INFO"
     await log_activity(
         user, "TICKET_STATUS", sev, {"id": str(ticket_id), "name": number},
-        f"{user.get('role').capitalize()} {user.get('username')} mengubah {number} → {body.status}",
+        both(lambda: tr(f"{user.get('role').capitalize()} {user.get('username')} mengubah {number} → {body.status}",
+                        f"{user.get('role').capitalize()} {user.get('username')} changed {number} → {body.status}")),
         request)
     await manager.broadcast(ticket_id, sysmsg)  # pesan sistem muncul di thread chat
     await manager.broadcast(ticket_id, {"type": "status", "status": body.status})
@@ -529,9 +534,13 @@ async def delete_ticket(ticket_id: int, request: Request, user: dict = Depends(r
         # Ringkasan dicatat sebelum tiketnya dihapus.
         await log_activity(
             user, "TICKET_DELETE", "WARNING", {"id": str(ticket_id), "name": t["ticket_number"]},
-            f"{user.get('username')} menghapus tiket {t['ticket_number']} '{short(t['title'])}' milik {t['student']} "
-            f"(kategori {t['category']}, status {t['status']}, dibuat {stamp(t['created_at'])}, "
-            f"ditutup {stamp(t['closed_at'])}, {t['messages']} pesan, {t['attachments']} lampiran)", request)
+            both(lambda: tr(
+                f"{user.get('username')} menghapus tiket {t['ticket_number']} '{short(t['title'])}' milik {t['student']} "
+                f"(kategori {t['category']}, status {t['status']}, dibuat {stamp(t['created_at'])}, "
+                f"ditutup {stamp(t['closed_at'])}, {t['messages']} pesan, {t['attachments']} lampiran)",
+                f"{user.get('username')} deleted ticket {t['ticket_number']} '{short(t['title'])}' of {t['student']} "
+                f"(category {t['category']}, status {t['status']}, created {stamp(t['created_at'])}, "
+                f"closed {stamp(t['closed_at'])}, {t['messages']} messages, {t['attachments']} attachments)")), request)
         await conn.execute("DELETE FROM tickets WHERE id = $1", ticket_id)
     remove_dir(_UPLOAD_BASE, str(ticket_id))
     return {"status": "deleted", "ticket_number": t["ticket_number"]}
@@ -564,8 +573,7 @@ async def reply_ticket(ticket_id: int, body: ReplyBody, request: Request, user: 
         if _is_admin(user) and t["status"] == "OPEN":
             await conn.execute(
                 "UPDATE tickets SET updated_at = NOW(), status = 'IN_PROGRESS' WHERE id = $1", ticket_id)
-            sysmsg = await _system_msg(
-                conn, ticket_id, f"Status diubah ke IN_PROGRESS oleh {user.get('username')} ({user.get('role')})")
+            sysmsg = await _system_msg(conn, ticket_id, _status_changed("IN_PROGRESS", user))
         else:
             await conn.execute("UPDATE tickets SET updated_at = NOW() WHERE id = $1", ticket_id)
     payload = {
@@ -654,9 +662,7 @@ async def ticket_ws(websocket: WebSocket, ticket_id: int, token: str = Query(...
                     if _is_admin(user) and cur and cur["status"] == "OPEN":
                         await conn.execute(
                             "UPDATE tickets SET updated_at = NOW(), status = 'IN_PROGRESS' WHERE id = $1", ticket_id)
-                        sysmsg = await _system_msg(
-                            conn, ticket_id,
-                            f"Status diubah ke IN_PROGRESS oleh {user.get('username')} ({user.get('role')})")
+                        sysmsg = await _system_msg(conn, ticket_id, _status_changed("IN_PROGRESS", user))
                     else:
                         await conn.execute("UPDATE tickets SET updated_at = NOW() WHERE id = $1", ticket_id)
                 await manager.broadcast(ticket_id, {

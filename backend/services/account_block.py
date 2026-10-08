@@ -17,7 +17,7 @@ from fastapi import HTTPException
 from auth import Role, forget_account
 from database import get_pool
 from i18n import tr
-from services.audit import log_activity
+from services.audit import Bi, both, log_activity
 
 log = logging.getLogger("account_block")
 
@@ -81,7 +81,10 @@ async def lock_out(current: dict, row, request, reason: str) -> dict:
         await ssh_kill.enqueue(ssh)
 
     counts = {"remote": remote, "web": len(web), "ssh": len(ssh)}
+    why = reason if isinstance(reason, Bi) else Bi(str(reason), str(reason))
     await log_activity(current, "USER_LOCKOUT", "CRITICAL", None,
-                       f"{by} menonaktifkan akun '{username}' dan memutus semua sesinya "
-                       f"(Remote {remote}, Web {len(web)}, SSH {len(ssh)}): {reason}", request)
+                       both(lambda: tr(f"{by} menonaktifkan akun '{username}' dan memutus semua sesinya "
+                                       f"(Remote {remote}, Web {len(web)}, SSH {len(ssh)}): {why.t()}",
+                                       f"{by} deactivated the account '{username}' and disconnected all of its sessions "
+                                       f"(Remote {remote}, Web {len(web)}, SSH {len(ssh)}): {why.t()}")), request)
     return counts

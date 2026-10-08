@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from auth import Role, get_current_user
 from database import get_pool
 from services import networks as nw
-from services.audit import log_activity
+from services.audit import both, log_activity
 from services.proxmox_client import ProxmoxError
 from i18n import tr
 
@@ -99,9 +99,12 @@ async def check_instance(label: str, user: dict = Depends(get_current_user)):
 async def add_pool(label: str, body: PoolBody, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
     res = await nw.add_pool(label, body.cidr)
-    replaced = f" (menggantikan {', '.join(res['replaced'])})" if res["replaced"] else ""
-    await log_activity(user, "NETWORK_POOL_ADD", "WARNING", {"id": label, "name": label},
-                       f"{user.get('username')} menambah blok alamat switch {res['added']}{replaced} di Proxmox {label}", request)
+    def _detail():
+        replaced = (tr(f" (menggantikan {', '.join(res['replaced'])})", f" (replacing {', '.join(res['replaced'])})")
+                    if res["replaced"] else "")
+        return tr(f"{user.get('username')} menambah blok alamat switch {res['added']}{replaced} di Proxmox {label}",
+                  f"{user.get('username')} added the switch address block {res['added']}{replaced} on Proxmox {label}")
+    await log_activity(user, "NETWORK_POOL_ADD", "WARNING", {"id": label, "name": label}, both(_detail), request)
     return {"label": label, **res}
 
 
@@ -110,7 +113,8 @@ async def remove_pool(label: str, cidr: str, request: Request, user: dict = Depe
     _require_admin(user)
     res = await nw.remove_pool(label, cidr)
     await log_activity(user, "NETWORK_POOL_REMOVE", "WARNING", {"id": label, "name": label},
-                       f"{user.get('username')} menghapus blok alamat switch {res['removed']} dari Proxmox {label}", request)
+                       both(lambda: tr(f"{user.get('username')} menghapus blok alamat switch {res['removed']} dari Proxmox {label}",
+                       f"{user.get('username')} removed the switch address block {res['removed']} from Proxmox {label}")), request)
     return {"label": label, **res}
 
 
@@ -119,9 +123,12 @@ async def create_network(body: NetworkCreate, request: Request, user: dict = Dep
     _require_admin(user)
     net = await nw.create(body.instance, body.name, body.cidr, body.snat, user.get("username"), body.add_pool)
     await log_activity(user, "NETWORK_CREATE", "WARNING", {"id": net["vnet"], "name": body.instance},
-                       f"{user.get('username')} membuat switch '{net['name']}' {net['cidr']} di {body.instance} "
-                       f"(VNet {net['vnet']}, internet {'NAT' if net['snat'] else 'mati'}"
-                       f"{', blok alamat baru' if net['pool_added'] else ''})", request)
+                       both(lambda: tr(f"{user.get('username')} membuat switch '{net['name']}' {net['cidr']} di {body.instance} "
+                                       f"(VNet {net['vnet']}, internet {'NAT' if net['snat'] else 'mati'}"
+                                       f"{', blok alamat baru' if net['pool_added'] else ''})",
+                                       f"{user.get('username')} created the switch '{net['name']}' {net['cidr']} on {body.instance} "
+                                       f"(VNet {net['vnet']}, internet {'NAT' if net['snat'] else 'off'}"
+                                       f"{', new address block' if net['pool_added'] else ''})")), request)
     return {**_view(net), "pool_added": net["pool_added"]}
 
 
@@ -132,12 +139,14 @@ async def update_network(network_id: int, body: NetworkUpdate, request: Request,
     net = await nw.update(network_id, body.name, body.snat)
     changes = []
     if net["name"] != before["name"]:
-        changes.append(f"nama '{before['name']}' -> '{net['name']}'")
+        changes.append(both(lambda: tr(f"nama '{before['name']}' -> '{net['name']}'", f"name '{before['name']}' -> '{net['name']}'")))
     if net["snat"] != before["snat"]:
-        changes.append(f"internet {'NAT' if net['snat'] else 'mati'}")
+        changes.append(both(lambda: tr(f"internet {'NAT' if net['snat'] else 'mati'}", f"internet {'NAT' if net['snat'] else 'off'}")))
     if changes:
         await log_activity(user, "NETWORK_UPDATE", "WARNING", {"id": net["vnet"], "name": net["instance"]},
-                           f"{user.get('username')} mengubah switch {net['cidr']} di {net['instance']}: {', '.join(changes)}", request)
+                           both(lambda: tr(f"{user.get('username')} mengubah switch {net['cidr']} di {net['instance']}: {', '.join(c.t() for c in changes)}",
+                                           f"{user.get('username')} changed the switch {net['cidr']} on {net['instance']}: {', '.join(c.t() for c in changes)}")),
+                           request)
     return _view(net)
 
 
@@ -146,7 +155,8 @@ async def delete_network(network_id: int, request: Request, user: dict = Depends
     _require_admin(user)
     net = await nw.delete(network_id)
     await log_activity(user, "NETWORK_DELETE", "WARNING", {"id": net["vnet"], "name": net["instance"]},
-                       f"{user.get('username')} menghapus switch '{net['name']}' {net['cidr']} di {net['instance']}", request)
+                       both(lambda: tr(f"{user.get('username')} menghapus switch '{net['name']}' {net['cidr']} di {net['instance']}",
+                       f"{user.get('username')} deleted the switch '{net['name']}' {net['cidr']} on {net['instance']}")), request)
     return {"status": "deleted"}
 
 

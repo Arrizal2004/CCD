@@ -28,7 +28,8 @@ import logging
 import re
 
 from database import get_pool
-from services.audit import log_activity
+from i18n import tr
+from services.audit import both, log_activity
 
 log = logging.getLogger("ssh_audit")
 
@@ -51,7 +52,9 @@ _ENDS = (
     (re.compile(r"^Connection reset by user tunnel (\S+) port (\d+)$"), "error"),
     (re.compile(r"^[\w.]+: Connection from user tunnel (\S+) port (\d+): "), "error"),
 )
-_END_TEXT = {"timeout": "klien tidak merespons", "error": "koneksi terputus"}
+def _end_text(reason: str) -> str:
+    return {"timeout": tr("klien tidak merespons", "the client stopped responding"),
+            "error": tr("koneksi terputus", "the connection dropped")}.get(reason, "")
 
 
 def parse_line(line: str) -> tuple[int, str] | None:
@@ -77,8 +80,8 @@ def _fmt_duration(seconds: float) -> str:
     s = int(seconds)
     h, m = divmod(s // 60, 60)
     if h:
-        return f"{h} jam {m} menit"
-    return f"{m} menit {s % 60} detik" if m else f"{s} detik"
+        return tr(f"{h} jam {m} menit", f"{h} h {m} min")
+    return tr(f"{m} menit {s % 60} detik", f"{m} min {s % 60} s") if m else tr(f"{s} detik", f"{s} s")
 
 
 def _user(row) -> dict | None:
@@ -119,9 +122,12 @@ async def _handle(conn, pid: int, msg: str, audits: list) -> bool:
                VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *""",
             key["id"] if key else None, key["username"] if key else "", key["role"] if key else "",
             key["name"] if key else "", m[3], ip, int(m[2]), pid)
-        who = row["username"] or "(key tidak terdaftar)"
+        def _login():
+            who = row["username"] or tr("(key tidak terdaftar)", "(unregistered key)")
+            return tr(f"{who} login ke bastion SSH dengan key {row['key_name'] or row['fingerprint']}",
+                      f"{who} signed in to the SSH bastion with the key {row['key_name'] or row['fingerprint']}")
         audits.append((_user(row), "SSH_LOGIN", "INFO", {"id": row["fingerprint"], "name": row["key_name"]},
-                       f"{who} login ke bastion SSH dengan key {row['key_name'] or row['fingerprint']}", ip))
+                       both(_login), ip))
         return True
 
     if m := _CHILD.match(msg):
@@ -151,8 +157,10 @@ async def _handle(conn, pid: int, msg: str, audits: list) -> bool:
             await conn.execute("UPDATE ssh_sessions SET denied_targets = array_append(denied_targets, $2) WHERE id = $1",
                                sess["id"], target)
             audits.append((_user(sess), "SSH_DENIED", "WARNING", {"id": target, "name": target},
-                           f"{sess['username'] or sess['fingerprint']} mencoba membuka {target} lewat bastion SSH, "
-                           f"ditolak karena bukan VM yang boleh diaksesnya", sess["client_ip"]))
+                           both(lambda: tr(f"{sess['username'] or sess['fingerprint']} mencoba membuka {target} lewat bastion SSH, "
+                                           f"ditolak karena bukan VM yang boleh diaksesnya",
+                                           f"{sess['username'] or sess['fingerprint']} tried to open {target} through the SSH bastion, "
+                                           f"refused because it is not a VM they may access")), sess["client_ip"]))
         return True
 
     if m := _TRANSFERRED.match(msg):
@@ -174,11 +182,15 @@ async def _handle(conn, pid: int, msg: str, audits: list) -> bool:
                 return False
             labels = await vm_labels(conn, sess["targets"])
             dest = ", ".join(f"{t} ({labels[t]})" if t in labels else t for t in sess["targets"])
-            why = f", {_END_TEXT[reason]}" if reason in _END_TEXT else ""
+
+            def _logout():
+                why = f", {_end_text(reason)}" if _end_text(reason) else ""
+                return tr(f"{sess['username'] or sess['fingerprint']} keluar dari bastion SSH setelah "
+                          f"{_fmt_duration(sess['duration'])}{why}, {f'tujuan {dest}' if dest else 'tanpa membuka VM'}",
+                          f"{sess['username'] or sess['fingerprint']} left the SSH bastion after "
+                          f"{_fmt_duration(sess['duration'])}{why}, {f'destination {dest}' if dest else 'without opening a VM'}")
             audits.append((_user(sess), "SSH_LOGOUT", "INFO", {"id": sess["fingerprint"], "name": sess["key_name"]},
-                           f"{sess['username'] or sess['fingerprint']} keluar dari bastion SSH setelah "
-                           f"{_fmt_duration(sess['duration'])}{why}, {f'tujuan {dest}' if dest else 'tanpa membuka VM'}",
-                           sess["client_ip"]))
+                           both(_logout), sess["client_ip"]))
             return True
     return False
 

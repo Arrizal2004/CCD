@@ -205,10 +205,12 @@ async def create_request(body: CreateRequestBody, request: Request, user: dict =
                RETURNING *""",
             req_id, int(user["sub"]), body.request_type, specs_json, body.notes,
         )
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     await log_activity(user, "INFRA_REQUEST_CREATE", "INFO", {"id": req_id, "name": req_id[:8]},
-                       f"{user.get('username')} mengajukan Infra Request {req_id[:8]} ({body.request_type}"
-                       f"{_specs_text(body.specs)})", request)
+                       both(lambda: tr(f"{user.get('username')} mengajukan Infra Request {req_id[:8]} ({body.request_type}"
+                                       f"{_specs_text(body.specs)})",
+                                       f"{user.get('username')} submitted infrastructure request {req_id[:8]} ({body.request_type}"
+                                       f"{_specs_text(body.specs)})")), request)
     return _row(row)
 
 
@@ -533,7 +535,7 @@ async def infra_ws(websocket: WebSocket, req_id: str, token: str = Query(...)):
 async def delete_request(req_id: str, request: Request, user: dict = Depends(require_superadmin)):
     """Hapus Infra Request beserta percakapan dan berkasnya (superadmin). Ringkasannya dicatat di
     Audit Trail sebelum dihapus; isi percakapan, catatan admin, dan kredensial tidak disalin."""
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     from services.record_purge import remove_dir, stamp
     try:
         uuid.UUID(req_id)
@@ -552,10 +554,15 @@ async def delete_request(req_id: str, request: Request, user: dict = Depends(req
         files = sum(1 for k in ("document_url", "config_file_url") if r[k])
         await log_activity(
             user, "INFRA_REQUEST_DELETE", "WARNING", {"id": req_id, "name": req_id[:8]},
-            f"{user.get('username')} menghapus Infra Request {req_id[:8]} ({r['request_type']}{_specs_text(specs)}) "
-            f"milik {r['student']} (status {r['status']}, dibuat {stamp(r['created_at'])}, "
-            f"ditinjau {stamp(r['reviewed_at'])}"
-            f"{', VM ' + r['linked_vm_name'] if r['linked_vm_name'] else ''}, {r['messages']} pesan, {files} berkas)", request)
+            both(lambda: tr(
+                f"{user.get('username')} menghapus Infra Request {req_id[:8]} ({r['request_type']}{_specs_text(specs)}) "
+                f"milik {r['student']} (status {r['status']}, dibuat {stamp(r['created_at'])}, "
+                f"ditinjau {stamp(r['reviewed_at'])}"
+                f"{', VM ' + r['linked_vm_name'] if r['linked_vm_name'] else ''}, {r['messages']} pesan, {files} berkas)",
+                f"{user.get('username')} deleted infrastructure request {req_id[:8]} ({r['request_type']}{_specs_text(specs)}) "
+                f"of {r['student']} (status {r['status']}, created {stamp(r['created_at'])}, "
+                f"reviewed {stamp(r['reviewed_at'])}"
+                f"{', VM ' + r['linked_vm_name'] if r['linked_vm_name'] else ''}, {r['messages']} messages, {files} files)")), request)
         await conn.execute("DELETE FROM infrastructure_requests WHERE id = $1", req_id)
     remove_dir(_UPLOAD_BASE, req_id)
     return {"status": "deleted", "id": req_id}
@@ -615,17 +622,20 @@ async def review_request(
                     student_id,
                 )
 
-    from services.audit import log_activity
+    from services.audit import both, log_activity
     await log_activity(user, "INFRA_REQUEST_STATUS", "WARNING" if body.status in ("DONE", "DECLINE") else "INFO",
                        {"id": req_id, "name": req_id[:8]},
-                       f"{user.get('role', '').capitalize()} {user.get('username')} mengubah Infra Request {req_id[:8]} "
-                       f"({row['request_type']}) milik {req.get('student_username')} → {body.status}", request)
+                       both(lambda: tr(f"{user.get('role', '').capitalize()} {user.get('username')} mengubah Infra Request {req_id[:8]} "
+                                       f"({row['request_type']}) milik {req.get('student_username')} → {body.status}",
+                                       f"{user.get('role', '').capitalize()} {user.get('username')} changed infrastructure request {req_id[:8]} "
+                                       f"({row['request_type']}) of {req.get('student_username')} → {body.status}")), request)
 
     # VPS selesai dengan VM Proxmox tertaut: VM itu langsung milik mahasiswa yang meminta.
     if body.status == "DONE" and row["request_type"] == "VPS" and row["linked_vm_id"] and "__" in (row["linked_host_name"] or ""):
         from services.assignments import assign_vm
         if await assign_vm(row["student_id"], row["linked_vm_id"], row["linked_host_name"], row["linked_vm_name"]):
             await log_activity(user, "RBAC_ASSIGN_VM", "WARNING", {"id": row["linked_vm_id"], "name": row["linked_host_name"]},
-                               f"Assign VM {row['linked_vm_id']} ke user #{row['student_id']} (otomatis dari request VPS {req_id})", request)
+                               both(lambda: tr(f"Assign VM {row['linked_vm_id']} ke user #{row['student_id']} (otomatis dari request VPS {req_id})",
+                                    f"Assigned VM {row['linked_vm_id']} to user #{row['student_id']} (automatically from VPS request {req_id})")), request)
 
     return _row(row)

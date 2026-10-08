@@ -71,3 +71,36 @@ def test_every_tr_call_is_complete():
             if _placeholders(node.args[0]) != _placeholders(node.args[1]):
                 bad.append(f"{where}: placeholder berbeda")
     assert bad == []
+
+
+def test_every_audit_detail_is_built_in_both_languages():
+    """Detail Activity Log harus disusun lewat both(...) supaya ada versi Inggrisnya. Teks langsung
+    (string, f-string, atau gabungan) di argumen detail berarti ada catatan yang hanya berbahasa Indonesia."""
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        rel = path.relative_to(root)
+        if rel.parts[0] in ("tests", "scripts", "migrations") or "__pycache__" in rel.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", "")) == "log_activity"):
+                continue
+            detail = node.args[4] if len(node.args) > 4 else next((k.value for k in node.keywords if k.arg == "detail"), None)
+            if detail is None:
+                continue
+            if isinstance(detail, (ast.Constant, ast.JoinedStr, ast.BinOp)):
+                offenders.append(f"{rel}:{node.lineno}")
+    assert not offenders, "detail audit tanpa both(): " + ", ".join(offenders)
+
+
+def test_both_builds_two_languages_and_fragments_follow():
+    from i18n import tr
+    from services.audit import Bi, both
+    part = both(lambda: tr("selesai", "done"))
+    whole = both(lambda: tr(f"Tugas {part.t()}", f"Task {part.t()}"))
+    assert isinstance(whole, Bi) and str(whole) == "Tugas selesai" and whole.en == "Task done"
+    assert whole.t() == "Tugas selesai"                                     # di luar permintaan: Indonesia

@@ -10,11 +10,36 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from database import get_pool
+from i18n import current as current_lang, lang_as
 
 log = logging.getLogger("audit")
 
 # action_type enum (longgar — string), severity_level: INFO | WARNING | CRITICAL
 SEVERITIES = ("INFO", "WARNING", "CRITICAL")
+
+
+class Bi(str):
+    """Kalimat dua bahasa. Nilai str-nya bahasa Indonesia (disimpan di detail_message); `.en` berisi
+    versi Inggris (detail_en); `.t()` memilih sesuai bahasa permintaan yang sedang berjalan."""
+    en: str
+
+    def __new__(cls, id_text: str, en_text: str):
+        obj = super().__new__(cls, id_text)
+        obj.en = en_text
+        return obj
+
+    def t(self) -> str:
+        return self.en if current_lang() == "en" else str(self)
+
+
+def both(build) -> Bi:
+    """Susun kalimat dua kali, sekali per bahasa, dari fungsi `build` yang memakai tr(). Potongan kalimat
+    di dalamnya (daftar perubahan, keterangan) cukup memakai tr() atau Bi.t() supaya ikut dua bahasa."""
+    with lang_as("id"):
+        id_text = build()
+    with lang_as("en"):
+        en_text = build()
+    return Bi(id_text, en_text)
 
 
 def _parse_dt(s: str) -> Optional[datetime]:
@@ -75,11 +100,11 @@ async def log_activity(
             await conn.execute(
                 """INSERT INTO audit_logs
                    (user_id, username, user_role, action_type, severity_level,
-                    target_server_id, target_server_name, client_ip, detail_message)
-                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
+                    target_server_id, target_server_name, client_ip, detail_message, detail_en)
+                   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)""",
                 uid, uname, role, action, sev,
                 str(tgt_id) if tgt_id is not None else None,
-                tgt_name, ip, detail,
+                tgt_name, ip, str(detail), detail.en if isinstance(detail, Bi) else None,
             )
     except Exception as e:
         # Airtight: jangan pernah menggagalkan request inti
@@ -98,7 +123,8 @@ async def query_logs(
     params = []
     i = 1
     if search:
-        where.append(f"(username ILIKE ${i} OR action_type ILIKE ${i} OR detail_message ILIKE ${i} OR target_server_name ILIKE ${i})")
+        where.append(f"(username ILIKE ${i} OR action_type ILIKE ${i} OR detail_message ILIKE ${i} "
+                     f"OR detail_en ILIKE ${i} OR target_server_name ILIKE ${i})")
         params.append(f"%{search}%"); i += 1
     if severity in SEVERITIES:
         where.append(f"severity_level = ${i}"); params.append(severity); i += 1
@@ -120,7 +146,7 @@ async def query_logs(
         rows = await conn.fetch(
             f"""SELECT id, created_at, user_id, username, user_role, action_type,
                        severity_level, target_server_id, target_server_name,
-                       client_ip, detail_message
+                       client_ip, detail_message, detail_en
                 FROM audit_logs {clause}
                 ORDER BY created_at DESC
                 LIMIT ${i} OFFSET ${i+1}""",
@@ -140,7 +166,8 @@ async def query_logs(
                 "target_id": r["target_server_id"],
                 "target_name": r["target_server_name"] or "-",
                 "client_ip": r["client_ip"] or "-",
-                "detail": r["detail_message"] or "",
+                # Bahasa admin yang membuka; catatan lama tanpa versi Inggris tetap berbahasa Indonesia.
+                "detail": (r["detail_en"] if current_lang() == "en" and r["detail_en"] else r["detail_message"]) or "",
             }
             for r in rows
         ],
