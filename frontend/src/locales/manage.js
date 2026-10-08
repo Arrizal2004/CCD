@@ -27,4 +27,10 @@ export default {
     'osopt.logoBig': ['Logo maksimal 256 KB', 'The logo may be at most 256 KB'],
     'osopt.logoAlt': ['Logo {name}', '{name} logo'],
     'osopt.saved': ['Pilihan OS tersimpan', 'OS choices saved'],
+
+    'del.button': ['Hapus', 'Delete'],
+    'del.confirm': ['Hapus permanen', 'Delete permanently'],
+    'del.ticketTitle': ['Hapus tiket {n}?', 'Delete ticket {n}?'],
+    'del.requestTitle': ['Hapus Infra Request {n}?', 'Delete infrastructure request {n}?'],
+    'del.warn': ['Pesan dan lampirannya ikut terhapus dan tidak bisa dikembalikan. Di Audit Trail hanya tersisa ringkasannya: nomor, judul, pemilik, status, tanggal, serta jumlah pesan dan lampiran. Isi percakapan tidak disimpan.', 'Its messages and attachments are deleted too and cannot be recovered. Only a summary stays in the audit trail: number, title, owner, status, dates, and the number of messages and attachments. The conversation itself is not kept.'],
 };

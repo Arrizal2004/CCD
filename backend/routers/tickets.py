@@ -21,7 +21,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from database import get_pool, get_student_vm_ids
-from auth import get_current_user, verify_token, Role
+from auth import get_current_user, require_superadmin, verify_token, Role
 from i18n import tr
 
 # ── Flexible auth: Bearer header OR ?token= query param ──────────────────────
@@ -510,6 +510,31 @@ async def update_status(ticket_id: int, body: StatusUpdate, request: Request, us
     await manager.broadcast(ticket_id, sysmsg)  # pesan sistem muncul di thread chat
     await manager.broadcast(ticket_id, {"type": "status", "status": body.status})
     return {"status": body.status, "ticket_number": number}
+
+
+@router.delete("/{ticket_id}")
+async def delete_ticket(ticket_id: int, request: Request, user: dict = Depends(require_superadmin)):
+    """Hapus tiket beserta pesan dan lampirannya (superadmin). Ringkasannya dicatat di Audit Trail
+    sebelum dihapus; isi percakapan tidak disalin."""
+    from services.record_purge import remove_dir, short, stamp
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        t = await conn.fetchrow(
+            """SELECT t.ticket_number, t.title, t.category, t.status, t.created_at, t.closed_at, u.username AS student,
+                      (SELECT count(*) FROM ticket_messages m WHERE m.ticket_id = t.id AND m.sender_id IS NOT NULL) AS messages,
+                      (SELECT count(*) FROM ticket_attachments a WHERE a.ticket_id = t.id) AS attachments
+               FROM tickets t JOIN users u ON u.id = t.student_id WHERE t.id = $1""", ticket_id)
+        if not t:
+            raise HTTPException(404, tr("Tiket tidak ditemukan", "Ticket not found"))
+        # Ringkasan dicatat sebelum tiketnya dihapus.
+        await log_activity(
+            user, "TICKET_DELETE", "WARNING", {"id": str(ticket_id), "name": t["ticket_number"]},
+            f"{user.get('username')} menghapus tiket {t['ticket_number']} '{short(t['title'])}' milik {t['student']} "
+            f"(kategori {t['category']}, status {t['status']}, dibuat {stamp(t['created_at'])}, "
+            f"ditutup {stamp(t['closed_at'])}, {t['messages']} pesan, {t['attachments']} lampiran)", request)
+        await conn.execute("DELETE FROM tickets WHERE id = $1", ticket_id)
+    remove_dir(_UPLOAD_BASE, str(ticket_id))
+    return {"status": "deleted", "ticket_number": t["ticket_number"]}
 
 
 @router.post("/{ticket_id}/messages")

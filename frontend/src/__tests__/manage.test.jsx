@@ -15,6 +15,7 @@ import { appTimeZone, loadSysConfig, osLogoUrl } from '../sysconfig';
 import Clock from '../components/Clock';
 import TicketCategoriesModal from '../components/TicketCategoriesModal';
 import OsOptionsModal from '../components/OsOptionsModal';
+import DeleteRecord from '../components/DeleteRecord';
 
 const CONFIG = {
     announcement: null, default_vm_lease_days: null, timezone: 'Asia/Jakarta',
@@ -128,5 +129,40 @@ describe('Pilihan OS dan logo', () => {
         fireEvent.change(screen.getByLabelText('Pilih logo 1'), { target: { files: [file('x.png', 'image/png', 300 * 1024)] } });
         expect(screen.getByRole('alert').textContent).toContain('maksimal 256 KB');
         expect(api.uploadOsLogo).not.toHaveBeenCalled();
+    });
+});
+
+describe('Hapus tiket dan Infra Request', () => {
+    it('meminta konfirmasi dulu, menjelaskan bahwa hanya ringkasan yang tersisa, lalu memanggil hapus', async () => {
+        const onDelete = vi.fn().mockResolvedValue({});
+        const onDeleted = vi.fn();
+        render(<DeleteRecord title="Hapus tiket TKT-0007?" summary="VM mati · budi · Terbuka" onDelete={onDelete} onDeleted={onDeleted} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Hapus' }));
+        const dialog = screen.getByRole('dialog', { name: 'Hapus tiket TKT-0007?' });
+        expect(dialog.textContent).toContain('VM mati · budi · Terbuka');
+        expect(dialog.textContent).toContain('Di Audit Trail hanya tersisa ringkasannya');
+        expect(onDelete).not.toHaveBeenCalled();                                   // belum ada yang terhapus sebelum dikonfirmasi
+
+        fireEvent.click(screen.getByRole('button', { name: 'Batal' }));
+        expect(screen.queryByRole('dialog')).toBeNull();
+        expect(onDelete).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Hapus' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Hapus permanen' }));
+        await waitFor(() => expect(onDeleted).toHaveBeenCalled());
+        expect(onDelete).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('menampilkan alasan penolakan dan tidak menutup tampilan saat gagal', async () => {
+        const onDelete = vi.fn().mockRejectedValue({ response: { data: { detail: 'Forbidden: fitur ini khusus superadmin.' } } });
+        const onDeleted = vi.fn();
+        render(<DeleteRecord title="Hapus?" summary="x" onDelete={onDelete} onDeleted={onDeleted} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Hapus' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Hapus permanen' }));
+        expect((await screen.findByRole('alert')).textContent).toContain('khusus superadmin');
+        expect(onDeleted).not.toHaveBeenCalled();
+        expect(screen.getByRole('dialog')).toBeTruthy();
     });
 });

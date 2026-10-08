@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { fetchTickets, fetchTicket, createTicket, updateTicketStatus, replyTicket, uploadTicketAttachment, fetchMyProxmoxVms } from '../api';
+import { fetchTickets, fetchTicket, createTicket, updateTicketStatus, replyTicket, uploadTicketAttachment, fetchMyProxmoxVms, deleteTicket } from '../api';
 import { formatCcdId } from '../format';
 import { currentLang, locale, useT } from '../i18n';
 import { appTimeZone, categoryLabel, useSysConfig } from '../sysconfig';
@@ -7,6 +7,7 @@ import useIsMobile from '../useIsMobile';
 import PaneTabs from './PaneTabs';
 import Icon from './Icons';
 import TicketCategoriesModal from './TicketCategoriesModal';
+import DeleteRecord from './DeleteRecord';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const WS_BASE  = API_BASE
@@ -479,7 +480,12 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
     return (
         <Overlay onClose={onClose} fullscreen={isMobile}>
             <div style={{ width: isMobile ? '100vw' : 'min(900px,96vw)', height: isMobile ? '100dvh' : 'min(640px,92vh)', display: 'flex', flexDirection: 'column' }}>
-                <Header title={`${t.ticket_number} · ${t.title}`} onClose={onClose} />
+                <Header title={`${t.ticket_number} · ${t.title}`} onClose={onClose}
+                    actions={currentUser?.role === 'superadmin' && (
+                        <DeleteRecord title={tr('del.ticketTitle', { n: t.ticket_number })}
+                            summary={`${t.title} · ${t.student_name} · ${tr(`tstatus.${t.status}`)}`}
+                            onDelete={() => deleteTicket(ticketId)} onDeleted={() => { onChanged?.(); onClose(); }} />
+                    )} />
                 {isMobile && <PaneTabs value={pane} onChange={setPane} chatCount={messages.filter(m => m.sender_role !== 'system').length} />}
                 <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
                     {/* Left: detail + snapshot */}
@@ -636,11 +642,12 @@ function Overlay({ children, onClose, fullscreen = false }) {
         </div>
     );
 }
-function Header({ title, onClose }) {
+function Header({ title, onClose, actions }) {
     const tr = useT();
     return (
         <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', background: 'var(--bg-card2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexShrink: 0 }}>
             <span title={title} style={{ fontSize: 14, fontWeight: 600, color: 'var(--cyan)', fontFamily: 'var(--fmono)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+            {actions}
             <button onClick={onClose} aria-label={tr('common.close')} style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--bg-hover)', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer', flexShrink: 0 }}>✕</button>
         </div>
     );

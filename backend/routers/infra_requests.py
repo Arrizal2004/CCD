@@ -29,7 +29,7 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-from auth import get_current_user, require_sysadmin, verify_token, Role
+from auth import get_current_user, require_superadmin, require_sysadmin, verify_token, Role
 from database import get_pool
 from i18n import tr
 
@@ -137,6 +137,15 @@ class ReviewBody(BaseModel):
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────
+def _specs_text(specs) -> str:
+    """Ringkasan spek untuk Audit Trail, mis. ", 2 vCPU, 4 GB RAM, 40 GB disk, Ubuntu"."""
+    if not isinstance(specs, dict):
+        return ""
+    parts = [f"{specs['cpu']} vCPU" if specs.get("cpu") else "", f"{specs['ram_gb']} GB RAM" if specs.get("ram_gb") else "",
+             f"{specs['storage_gb']} GB disk" if specs.get("storage_gb") else "", str(specs.get("os") or "")]
+    return "".join(f", {p}" for p in parts if p)
+
+
 def _row(r) -> dict:
     d = dict(r)
     if isinstance(d.get("specs"), str):
@@ -171,7 +180,7 @@ async def _get_request_or_403(conn, req_id: str, user: dict) -> dict:
 # ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("")
-async def create_request(body: CreateRequestBody, user: dict = Depends(get_current_user)):
+async def create_request(body: CreateRequestBody, request: Request, user: dict = Depends(get_current_user)):
     if body.request_type not in ("VPS", "VPN"):
         raise HTTPException(400, tr("request_type harus 'VPS' atau 'VPN'",
                                     "request_type must be 'VPS' or 'VPN'"))
@@ -196,6 +205,10 @@ async def create_request(body: CreateRequestBody, user: dict = Depends(get_curre
                RETURNING *""",
             req_id, int(user["sub"]), body.request_type, specs_json, body.notes,
         )
+    from services.audit import log_activity
+    await log_activity(user, "INFRA_REQUEST_CREATE", "INFO", {"id": req_id, "name": req_id[:8]},
+                       f"{user.get('username')} mengajukan Infra Request {req_id[:8]} ({body.request_type}"
+                       f"{_specs_text(body.specs)})", request)
     return _row(row)
 
 
@@ -516,6 +529,38 @@ async def infra_ws(websocket: WebSocket, req_id: str, token: str = Query(...)):
         manager.disconnect(req_id, websocket)
 
 
+@router.delete("/{req_id}")
+async def delete_request(req_id: str, request: Request, user: dict = Depends(require_superadmin)):
+    """Hapus Infra Request beserta percakapan dan berkasnya (superadmin). Ringkasannya dicatat di
+    Audit Trail sebelum dihapus; isi percakapan, catatan admin, dan kredensial tidak disalin."""
+    from services.audit import log_activity
+    from services.record_purge import remove_dir, stamp
+    try:
+        uuid.UUID(req_id)
+    except ValueError:
+        raise HTTPException(404, tr("Request tidak ditemukan", "Request not found"))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        r = await conn.fetchrow(
+            """SELECT ir.request_type, ir.specs, ir.status, ir.created_at, ir.reviewed_at, ir.linked_vm_name,
+                      ir.document_url, ir.config_file_url, u.username AS student,
+                      (SELECT count(*) FROM infra_request_messages m WHERE m.request_id = ir.id) AS messages
+               FROM infrastructure_requests ir JOIN users u ON u.id = ir.student_id WHERE ir.id = $1""", req_id)
+        if not r:
+            raise HTTPException(404, tr("Request tidak ditemukan", "Request not found"))
+        specs = json.loads(r["specs"]) if isinstance(r["specs"], str) else r["specs"]
+        files = sum(1 for k in ("document_url", "config_file_url") if r[k])
+        await log_activity(
+            user, "INFRA_REQUEST_DELETE", "WARNING", {"id": req_id, "name": req_id[:8]},
+            f"{user.get('username')} menghapus Infra Request {req_id[:8]} ({r['request_type']}{_specs_text(specs)}) "
+            f"milik {r['student']} (status {r['status']}, dibuat {stamp(r['created_at'])}, "
+            f"ditinjau {stamp(r['reviewed_at'])}"
+            f"{', VM ' + r['linked_vm_name'] if r['linked_vm_name'] else ''}, {r['messages']} pesan, {files} berkas)", request)
+        await conn.execute("DELETE FROM infrastructure_requests WHERE id = $1", req_id)
+    remove_dir(_UPLOAD_BASE, req_id)
+    return {"status": "deleted", "id": req_id}
+
+
 @router.patch("/{req_id}/status")
 async def review_request(
     req_id:  str,
@@ -570,10 +615,15 @@ async def review_request(
                     student_id,
                 )
 
+    from services.audit import log_activity
+    await log_activity(user, "INFRA_REQUEST_STATUS", "WARNING" if body.status in ("DONE", "DECLINE") else "INFO",
+                       {"id": req_id, "name": req_id[:8]},
+                       f"{user.get('role', '').capitalize()} {user.get('username')} mengubah Infra Request {req_id[:8]} "
+                       f"({row['request_type']}) milik {req.get('student_username')} → {body.status}", request)
+
     # VPS selesai dengan VM Proxmox tertaut: VM itu langsung milik mahasiswa yang meminta.
     if body.status == "DONE" and row["request_type"] == "VPS" and row["linked_vm_id"] and "__" in (row["linked_host_name"] or ""):
         from services.assignments import assign_vm
-        from services.audit import log_activity
         if await assign_vm(row["student_id"], row["linked_vm_id"], row["linked_host_name"], row["linked_vm_name"]):
             await log_activity(user, "RBAC_ASSIGN_VM", "WARNING", {"id": row["linked_vm_id"], "name": row["linked_host_name"]},
                                f"Assign VM {row['linked_vm_id']} ke user #{row['student_id']} (otomatis dari request VPS {req_id})", request)

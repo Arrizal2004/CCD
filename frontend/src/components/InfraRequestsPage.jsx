@@ -5,11 +5,12 @@ import {
     uploadInfraDocument, uploadInfraConfig,
     getInfraConfigUrl, getInfraDocUrl,
     fetchInfraMessages, infraRequestWsUrl,
-    fetchAllProxmoxVms,
+    fetchAllProxmoxVms, deleteInfraRequest,
 } from '../api';
 import useIsMobile from '../useIsMobile';
 import { osLogoUrl, useSysConfig } from '../sysconfig';
 import OsOptionsModal, { OsLogo } from './OsOptionsModal';
+import DeleteRecord from './DeleteRecord';
 import { formatCcdId } from '../format';
 import { locale, t as translate, useT } from '../i18n';
 import PaneTabs from './PaneTabs';
@@ -366,6 +367,11 @@ function DetailModal({ req, currentUser, onClose, onUpdated }) {
                         {isAdmin && req.student_name && <span style={{ color: 'var(--text3)', fontSize: 11, fontWeight: 400, marginLeft: 8 }}>— {req.student_name}</span>}
                     </span>
                     <StatusBadge status={req.status} />
+                    {currentUser?.role === 'superadmin' && (
+                        <DeleteRecord title={t('del.requestTitle', { n: req.id.slice(0, 8) })}
+                            summary={`${req.request_type} · ${req.student_name || ''} · ${STATUS_CFG[req.status] ? t(STATUS_CFG[req.status].label) : req.status}`}
+                            onDelete={() => deleteInfraRequest(req.id)} onDeleted={onUpdated} />
+                    )}
                     <button onClick={onClose} aria-label={t('infra.close')} style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer', marginLeft: 4, flexShrink: 0 }}>✕</button>
                 </div>
 

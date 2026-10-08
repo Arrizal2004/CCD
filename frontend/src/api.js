@@ -483,6 +483,8 @@ export const uploadOsLogo = (name, file) => {
     return api.post('/api/v1/system/os-logo', form, { params: { name } }).then(r => r.data);
 };
 export const deleteOsLogo = (name) => api.delete('/api/v1/system/os-logo', { params: { name } }).then(r => r.data);
+export const deleteTicket = (id) => api.delete(`/api/tickets/${id}`).then(r => r.data);
+export const deleteInfraRequest = (id) => api.delete(`/api/v1/infra-requests/${encodeURIComponent(id)}`).then(r => r.data);
 export const fetchAuditStats = () => api.get('/api/v1/system/audit-stats').then(r => r.data);
 
 // ── Siklus akun dan masa sewa VM ─────────────────────────────────────────────
