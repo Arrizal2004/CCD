@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { fetchProxmoxInstances, createProxmoxInstance, updateProxmoxInstance, deleteProxmoxInstance } from '../api';
+import { fetchProxmoxInstances, createProxmoxInstance, updateProxmoxInstance, deleteProxmoxInstance, getProxmoxSshUrl, appendGuacToken, applyGuacTouchInputDefault } from '../api';
 import { useT } from '../i18n';
 
 const emptyForm = { label: '', host: '', token_id: '', token_secret: '', verify_ssl: false };
 
 // Panel CRUD Proxmox instance — dipakai langsung sebagai halaman (tab "Instances") maupun
 // dibungkus modal (ProxmoxInstancesModal, dipanggil dari tombol "Manage Instances" di Servers).
-export default function ProxmoxInstancesPanel({ onChanged }) {
+// canModify: hanya superadmin yang boleh mengubah dan menghapus; sysadmin hanya menambah.
+export default function ProxmoxInstancesPanel({ onChanged, canModify = false }) {
     const t = useT();
     const [instances, setInstances] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -67,6 +68,19 @@ export default function ProxmoxInstancesPanel({ onChanged }) {
         }
     };
 
+    // Terminal SSH ke host Proxmox lewat Guacamole; username dan password diminta di tab Guacamole.
+    const [sshBusy, setSshBusy] = useState(null);
+    const openSsh = async (label) => {
+        setSshBusy(label); setError(null);
+        try {
+            const res = await getProxmoxSshUrl(label);
+            applyGuacTouchInputDefault();
+            window.open(appendGuacToken(res.url), '_blank');
+        } catch (e) {
+            setError(e?.response?.data?.detail || t('inst.sshFailed'));
+        } finally { setSshBusy(null); }
+    };
+
     const handleDelete = async (label) => {
         if (!confirm(t('inst.deleteConfirm', { label }))) return;
         try {
@@ -101,6 +115,11 @@ export default function ProxmoxInstancesPanel({ onChanged }) {
                                     <div style={{ fontSize: 11, color: 'var(--text3)' }}>{inst.host} · {inst.token_id} · {inst.verify_ssl ? t('inst.sslOn') : t('inst.sslOff')}</div>
                                 </div>
                                 <div style={{ display: 'flex', gap: 6 }}>
+                                    <button onClick={() => openSsh(inst.label)} disabled={sshBusy === inst.label}
+                                        style={{ padding: '4px 10px', fontSize: 10, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--green)', color: 'var(--green)', opacity: sshBusy === inst.label ? 0.6 : 1 }}>
+                                        {sshBusy === inst.label ? t('inst.sshOpening') : t('inst.ssh')}
+                                    </button>
+                                    {canModify && (<>
                                     <button onClick={() => startEdit(inst)}
                                         style={{ padding: '4px 10px', fontSize: 10, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--cyan)', color: 'var(--cyan)' }}>
                                         {t('common.edit')}
@@ -109,10 +128,16 @@ export default function ProxmoxInstancesPanel({ onChanged }) {
                                         style={{ padding: '4px 10px', fontSize: 10, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--red)', color: 'var(--red)' }}>
                                         {t('common.delete')}
                                     </button>
+                                    </>)}
                                 </div>
                             </div>
                         ))}
                     </div>
+                    {instances.length > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10, lineHeight: 1.5 }}>
+                            {t('inst.sshHint')}{!canModify && ` ${t('inst.superOnly')}`}
+                        </div>
+                    )}
                     <button onClick={startNew}
                         style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, cursor: 'pointer', background: 'var(--cyan-glow)', border: '1px solid var(--cyan)', color: 'var(--cyan)' }}>
                         {t('inst.add')}

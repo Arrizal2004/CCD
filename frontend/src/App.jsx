@@ -306,7 +306,7 @@ export default function App() {
                     <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>
                         {t('app.instancesTitle')}
                     </div>
-                    <ProxmoxInstancesPanel />
+                    <ProxmoxInstancesPanel canModify={authUser?.role === 'superadmin'} />
                 </div>
             )}
             </div>

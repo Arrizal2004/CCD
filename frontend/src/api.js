@@ -485,6 +485,8 @@ export const uploadOsLogo = (name, file) => {
 export const deleteOsLogo = (name) => api.delete('/api/v1/system/os-logo', { params: { name } }).then(r => r.data);
 export const deleteTicket = (id) => api.delete(`/api/tickets/${id}`).then(r => r.data);
 export const deleteInfraRequest = (id) => api.delete(`/api/v1/infra-requests/${encodeURIComponent(id)}`).then(r => r.data);
+export const getProxmoxSshUrl = (label, port = 22) =>
+    api.get(`/api/v1/proxmox/instances/${encodeURIComponent(label)}/ssh-url`, { params: { port } }).then(r => r.data);
 export const fetchAuditStats = () => api.get('/api/v1/system/audit-stats').then(r => r.data);
 
 // ── Siklus akun dan masa sewa VM ─────────────────────────────────────────────

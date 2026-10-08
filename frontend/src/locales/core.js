@@ -34,7 +34,6 @@ export default {
     'announcement.dismiss': ['Tutup', 'Dismiss'],
 
     'login.title': ['Masuk ke Dashboard', 'Sign in'],
-    'login.subtitle': ['Masukkan kredensial yang diberikan administrator', 'Use the credentials provided by your administrator'],
     'login.required': ['Username dan password wajib diisi', 'Username and password are required'],
     'login.failed': ['Login gagal — periksa koneksi ke server', 'Sign-in failed — check your connection to the server'],
     'login.verifying': ['Memverifikasi...', 'Verifying...'],

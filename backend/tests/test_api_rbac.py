@@ -101,3 +101,18 @@ def test_sysadmin_cannot_create_user(client, sysadmin_token):
         headers=_h(sysadmin_token),
     )
     assert r.status_code == 403
+
+
+def test_sysadmin_can_add_proxmox_instance_but_not_edit_or_delete(client, sysadmin_token, superadmin_token, student_token):
+    label = "tst_pve_rbac"
+    P = "/api/v1/proxmox/instances"
+    body = {"label": label, "host": "10.9.9.8", "token_id": "root@pam!ccd", "token_secret": "rahasia-uji"}
+    client.delete(f"{P}/{label}", headers=_h(superadmin_token))                       # sisa test sebelumnya
+    assert client.post(P, json=body, headers=_h(student_token)).status_code == 403
+    assert client.post(P, json=body, headers=_h(sysadmin_token)).status_code == 200       # menambah boleh
+    assert client.put(f"{P}/{label}", json={"host": "10.9.9.7"}, headers=_h(sysadmin_token)).status_code == 403
+    assert client.delete(f"{P}/{label}", headers=_h(sysadmin_token)).status_code == 403
+    assert any(i["label"] == label and i["host"] == "10.9.9.8"
+               for i in client.get(P, headers=_h(sysadmin_token)).json())                  # tidak berubah dan tidak terhapus
+    assert client.put(f"{P}/{label}", json={"host": "10.9.9.7"}, headers=_h(superadmin_token)).status_code == 200
+    assert client.delete(f"{P}/{label}", headers=_h(superadmin_token)).status_code == 200

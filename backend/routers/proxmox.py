@@ -38,7 +38,7 @@ import time
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from auth import get_current_user, Role
@@ -63,6 +63,12 @@ def _require_admin(user: dict):
     if user.get("role") not in _ADMIN_ROLES:
         raise HTTPException(status_code=403, detail=tr("Aksi ini hanya untuk admin/sysadmin/superadmin",
                                                        "Only admins/sysadmins/superadmins can do this"))
+
+
+def _require_superadmin(user: dict):
+    if user.get("role") != Role.SUPERADMIN:
+        raise HTTPException(status_code=403, detail=tr("Mengubah atau menghapus instance Proxmox hanya untuk superadmin",
+                                                       "Only superadmins can edit or delete Proxmox instances"))
 
 
 async def _require_admin_or_assigned(user: dict, host_key: str, vmid: int):
@@ -258,7 +264,7 @@ async def post_instance(body: InstanceCreateRequest, request: Request, user: dic
 @router.put("/instances/{label}")
 async def put_instance(label: str, body: InstanceUpdateRequest, request: Request,
                        user: dict = Depends(get_current_user)):
-    _require_admin(user)
+    _require_superadmin(user)       # sysadmin boleh menambah instance, tetapi tidak mengubah atau menghapusnya
     old = await pve_instances.get_instance(label)
     updated = await pve_instances.update_instance(
         label, body.host, body.token_id, body.token_secret, body.verify_ssl
@@ -281,13 +287,46 @@ async def put_instance(label: str, body: InstanceUpdateRequest, request: Request
     return updated
 
 
+@router.get("/instances/{label}/ssh-url")
+async def proxmox_ssh_url(label: str, request: Request, port: int = Query(22, ge=1, le=65535),
+                          user: dict = Depends(get_current_user)):
+    """URL Guacamole untuk SSH ke host Proxmox (sysadmin dan superadmin). Koneksinya tanpa kredensial
+    tersimpan: Guacamole meminta username dan password setiap kali, dan hanya akun admin yang diberi akses."""
+    import os
+    from services import guac_sync as gs
+    from services import system_settings as ss
+    _require_admin(user)
+    inst = await pve_instances.get_instance(label)
+    if not inst:
+        raise HTTPException(status_code=404, detail=tr("Instance tidak ditemukan", "Instance not found"))
+    hostname = gs.host_only(inst["host"])
+    conn_id = await gs.sync_proxmox_host_connection(label, hostname, port, ss.tzinfo(await ss.get_settings()).key)
+    if not conn_id:
+        raise HTTPException(status_code=502, detail=tr("Gagal menyiapkan koneksi SSH di Guacamole",
+                                                       "Could not set up the SSH connection in Guacamole"))
+    await gs.grant_vm_to_all_admins(conn_id)
+    await gs.grant_connection(user.get("username") or "", conn_id)
+    url = await gs.get_connection_url_by_name(gs.proxmox_host_connection_name(label), os.getenv("GUAC_PUBLIC_URL", "").rstrip("/"))
+    if not url:
+        raise HTTPException(status_code=502, detail=tr("Koneksi SSH belum siap di Guacamole", "The SSH connection is not ready in Guacamole yet"))
+    await log_activity(user, "PVE_HOST_SSH", "WARNING", {"id": label, "name": label},
+                       both(lambda: tr(f"{user.get('username')} membuka SSH ke host Proxmox '{label}' ({hostname}:{port})",
+                                       f"{user.get('username')} opened SSH to the Proxmox host '{label}' ({hostname}:{port})")), request)
+    return {"url": url, "hostname": hostname, "port": port}
+
+
 @router.delete("/instances/{label}")
 async def delete_instance(label: str, request: Request, user: dict = Depends(get_current_user)):
-    _require_admin(user)
+    _require_superadmin(user)
     old = await pve_instances.get_instance(label)
     ok = await pve_instances.delete_instance(label)
     if not ok:
         raise HTTPException(status_code=404, detail=tr("Instance tidak ditemukan", "Instance not found"))
+    try:   # koneksi SSH ke host-nya di Guacamole ikut dibersihkan (kalau ada)
+        from services import guac_sync as gs
+        await gs.delete_named_connection(gs.proxmox_host_connection_name(label))
+    except Exception as e:
+        log.warning("koneksi SSH Guacamole untuk %s tidak bisa dihapus: %s", label, e)
     await log_activity(user, "PVE_INSTANCE_DELETE", "CRITICAL", {"id": label, "name": label},
                        both(lambda: tr(f"{user.get('username')} menghapus instance Proxmox '{label}' ({(old or {}).get('host', '')})",
                        f"{user.get('username')} deleted the Proxmox instance '{label}' ({(old or {}).get('host', '')})")),

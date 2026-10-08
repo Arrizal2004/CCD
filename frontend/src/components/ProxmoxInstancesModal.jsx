@@ -1,7 +1,7 @@
 import ProxmoxInstancesPanel from './ProxmoxInstancesPanel';
 import { useT } from '../i18n';
 
-export default function ProxmoxInstancesModal({ onClose, onChanged }) {
+export default function ProxmoxInstancesModal({ onClose, onChanged, canModify = false }) {
     const t = useT();
     return (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 210 }} onClick={onClose}>
@@ -10,7 +10,7 @@ export default function ProxmoxInstancesModal({ onClose, onChanged }) {
                     <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{t('inst.title')}</div>
                     <button onClick={onClose} aria-label={t('common.close')} style={{ background: 'transparent', border: 'none', color: 'var(--text3)', fontSize: 18, cursor: 'pointer' }}>×</button>
                 </div>
-                <ProxmoxInstancesPanel onChanged={onChanged} />
+                <ProxmoxInstancesPanel onChanged={onChanged} canModify={canModify} />
             </div>
         </div>
     );

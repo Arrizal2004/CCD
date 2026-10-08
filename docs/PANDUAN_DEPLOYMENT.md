@@ -253,6 +253,10 @@ Catatan: ACL eksplisit tetap diperlukan walaupun tokennya milik `root@pam`, kare
 
 Kalau gagal konek, cek lagi: token ID/secret benar, ACL pool sudah di-grant (Bagian 2.3), dan port 8006 Proxmox bisa dijangkau dari VPS dashboard (`curl -k https://<ip-proxmox>:8006` dari VPS).
 
+**Siapa yang boleh mengelola instance.** Sysadmin dan superadmin bisa menambah instance. Mengubah atau menghapusnya hanya boleh superadmin; sysadmin tidak melihat tombolnya, dan server menolaknya (403).
+
+**SSH ke host Proxmox.** Di daftar instance (tab **Integrations**, atau tombol *Manage Instances* di Servers) setiap instance punya tombol **Terminal SSH**. Tombol itu membuka terminal SSH ke host Proxmox di tab baru lewat Guacamole. Dashboard sengaja tidak menyimpan username atau password host: Guacamole memintanya setiap kali tersambung, jadi yang bisa masuk hanya yang memegang kredensial itu. Hanya sysadmin dan superadmin yang bisa membukanya; mahasiswa tidak diberi akses ke koneksinya. Syaratnya, VPS dashboard bisa menjangkau port 22 host Proxmox (lewat jaringan yang sama atau Tailscale, Bagian 1.6) dan login SSH di host itu diizinkan. Alamat yang dipakai adalah alamat instance tanpa port 8006. Setiap pembukaan tercatat di Activity Log (`PVE_HOST_SSH`), dan koneksinya ikut dihapus saat instance dihapus.
+
 ---
 
 ## 4. Buat Template

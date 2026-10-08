@@ -670,6 +670,54 @@ async def get_connection_url_by_name(name: str, guac_public_url: str = "") -> Op
     return f"{base}/#/client/{client_id}"
 
 
+def proxmox_host_connection_name(label: str) -> str:
+    """Nama koneksi SSH ke host Proxmox. Segmen host-nya label instance (tanpa '__node'), jadi tidak
+    pernah cocok dengan awalan 'HV/{instance}__{node}/' milik sinkronisasi VM mahasiswa."""
+    return f"HV/{label}/PROXMOX-HOST"
+
+
+def host_only(address: str) -> str:
+    """'192.168.1.10:8006', 'https://pve.contoh.id:8006', atau '[fd00::1]:8006' -> alamat tanpa skema dan port."""
+    addr = (address or "").strip()
+    addr = addr.split("://", 1)[-1].split("/", 1)[0]
+    if addr.startswith("["):
+        return addr[1:].split("]", 1)[0]
+    host, sep, port = addr.rpartition(":")
+    return host if sep and port.isdigit() and ":" not in host else addr
+
+
+def build_host_ssh_params(hostname: str, port: int = 22, timezone: str = "Asia/Jakarta") -> dict:
+    """Parameter koneksi SSH ke host Proxmox. username, password, dan private-key SENGAJA tidak ada:
+    Guacamole meminta kredensial itu ke pengguna setiap kali tersambung, jadi tidak ada yang tersimpan."""
+    return {
+        "hostname": hostname, "port": str(port),
+        "color-scheme": "green-black", "font-name": "monospace", "font-size": "14", "scrollback": "5000",
+        "terminal-type": "xterm", "locale": "C.UTF-8", "server-alive-interval": "15", "timezone": timezone,
+    }
+
+
+async def sync_proxmox_host_connection(label: str, hostname: str, port: int = 22, timezone: str = "Asia/Jakarta") -> Optional[str]:
+    """Buat atau perbarui koneksi SSH ke host Proxmox `label` (tanpa kredensial tersimpan)."""
+    name = proxmox_host_connection_name(label)
+    body = {
+        "name": name, "parentIdentifier": "ROOT", "protocol": "ssh",
+        "parameters": build_host_ssh_params(hostname, port, timezone),
+        "attributes": {"max-connections": "5", "max-connections-per-user": "2",
+                       "guacd-hostname": "", "guacd-port": "", "guacd-encryption": ""},
+    }
+    existing_id = await _find_connection_id(name)
+    if existing_id:
+        _, s = await _fetch("PUT", f"/session/data/{GUAC_DS}/connections/{existing_id}", body)
+        if s < 300:
+            return existing_id
+        await _fetch("DELETE", f"/session/data/{GUAC_DS}/connections/{existing_id}")
+    data, s = await _fetch("POST", f"/session/data/{GUAC_DS}/connections", body)
+    if s < 300 and isinstance(data, dict):
+        return data.get("identifier")
+    log.warning("Guacamole: koneksi SSH ke host Proxmox %s gagal dibuat: %s", label, data)
+    return None
+
+
 async def delete_named_connection(name: str) -> bool:
     cid = await _find_connection_id(name)
     if cid:

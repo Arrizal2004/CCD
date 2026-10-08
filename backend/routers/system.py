@@ -42,9 +42,10 @@ def _os_logo_map(s: dict) -> dict:
 
 
 def _with_ssh_env(s: dict) -> dict:
-    """Keterangan untuk kartu SSH di halaman Sistem: apakah bastion aktif dan nilai cadangan dari .env."""
+    """Keterangan untuk kartu SSH di halaman Sistem: apakah bastion aktif dan apakah .env punya alamat cadangan.
+    Nilai alamat dari .env sengaja tidak dikirim, supaya domain server tidak muncul di tampilan."""
     from routers.ssh_keys import bastion_enabled, public_port
-    return {**s, "ssh_env": {"enabled": bastion_enabled(), "env_host": os.getenv("BASTION_PUBLIC_HOST") or "",
+    return {**s, "ssh_env": {"enabled": bastion_enabled(), "env_host_set": bool(os.getenv("BASTION_PUBLIC_HOST")),
                              "port": public_port()}}
 
 

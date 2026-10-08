@@ -241,11 +241,12 @@ def test_ssh_public_host_overrides_env(client, superadmin_token, student_token, 
     monkeypatch.setenv("BASTION_PUBLIC_HOST", "ssh.lama.example")
     assert host() == "ssh.lama.example"
     s = client.get("/api/v1/system/settings", headers=auth(superadmin_token)).json()
-    assert s["ssh_public_host"] == "" and s["ssh_env"]["env_host"] == "ssh.lama.example"
+    assert s["ssh_public_host"] == "" and s["ssh_env"]["env_host_set"] is True
+    assert "ssh.lama.example" not in str(s)                      # nilai dari .env tidak dikirim ke halaman Sistem
 
     r = _put(client, superadmin_token, ssh_public_host="SSH.Baru.Example", ssh_env={"diabaikan": True})
     assert r.status_code == 200, r.text
-    assert r.json()["ssh_public_host"] == "ssh.baru.example" and r.json()["ssh_env"]["env_host"] == "ssh.lama.example"
+    assert r.json()["ssh_public_host"] == "ssh.baru.example" and r.json()["ssh_env"]["env_host_set"] is True
     assert host() == "ssh.baru.example"
     assert _put(client, superadmin_token, ssh_public_host="https://ssh.baru.example").status_code == 400
     assert _put(client, superadmin_token, ssh_public_host="").status_code == 200

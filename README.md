@@ -10,6 +10,7 @@ Mahasiswa login, melihat VM yang ditugaskan kepadanya, lalu klik **Connect**. Se
 - Akses per VM atau per group. Mahasiswa hanya melihat VM miliknya, tanpa nama host Proxmox.
 - Membuat VM dari template (clone dan cloud-init), snapshot dan rollback oleh mahasiswa, dan resize RAM, CPU, serta storage oleh admin. Resize hanya saat VM mati, dan storage hanya bisa diperbesar.
 - VM massal per kelas (satu VM per anggota grup, langsung di-assign, progres di latar belakang, kredensial CSV) dan Create VM yang terisi otomatis dari spek Infra Request mahasiswa.
+- SSH ke host Proxmox dari dashboard lewat Guacamole untuk sysadmin dan superadmin. Username dan password diminta setiap kali dan tidak disimpan. Instance Proxmox bisa ditambah sysadmin, tetapi hanya superadmin yang boleh mengubah atau menghapusnya.
 - Open Web: membuka aplikasi web yang berjalan di VM dari dalam dashboard. Alamat privat dimuat lewat proxy dashboard.
 - Tiket helpdesk, termasuk laporan langsung dari Detail VM, dan permintaan VM (Infra Request). Superadmin bisa menghapus tiket dan request yang sudah tidak diperlukan; ringkasannya tetap ada di audit log.
 - Tampilan dashboard dan Connect bisa dipakai dari smartphone dan tablet.

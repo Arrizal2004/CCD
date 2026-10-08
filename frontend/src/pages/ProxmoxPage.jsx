@@ -546,6 +546,7 @@ export default function ProxmoxPage({ currentUser }) {
                 <ProxmoxInstancesModal
                     onClose={() => setShowInstances(false)}
                     onChanged={loadInstances}
+                    canModify={currentUser?.role === 'superadmin'}
                 />
             )}
         </div>

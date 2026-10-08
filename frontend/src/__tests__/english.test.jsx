@@ -81,7 +81,7 @@ describe('mode English tidak menampilkan teks Indonesia', () => {
             accent_color: '', default_language: 'en', default_theme: 'dark',
             announcement: { text: 'x', level: 'info', starts_at: null, ends_at: null, show_on_login: false },
             default_vm_lease_days: null, default_account_days: null, ticket_categories: [{ key: 'OTHERS', label: '' }],
-            vps_os_options: ['Ubuntu'], ssh_public_host: '', logo_version: null, ssh_env: { enabled: false, env_host: '', port: 2222 },
+            vps_os_options: ['Ubuntu'], ssh_public_host: '', logo_version: null, ssh_env: { enabled: false, env_host_set: false, port: 2222 },
         });
         const { container } = render(<SystemSettingsPage />);
         await screen.findByText('System settings');

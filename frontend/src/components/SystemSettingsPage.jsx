@@ -111,7 +111,8 @@ export default function SystemSettingsPage() {
     const domains = rules.filter(r => r.startsWith('@') || !r.includes('@'));
     const ann = form.announcement;
     const sshEnv = form.ssh_env || {};
-    const sshHost = (form.ssh_public_host || '').trim() || sshEnv.env_host || window.location.hostname;
+    // Alamat dari .env dan domain dashboard sengaja tidak ditampilkan di sini; kosong memakai contoh umum.
+    const sshHost = (form.ssh_public_host || '').trim() || `<${t('sys.sshCmdHost')}>`;
 
     const reloadLogo = async () => {
         const s = await fetchSystemSettings();
@@ -315,13 +316,13 @@ export default function SystemSettingsPage() {
                 )}
                 <label style={label} htmlFor="ssh-public-host">{t('sys.sshHost')}</label>
                 <input id="ssh-public-host" value={form.ssh_public_host || ''} maxLength={253}
-                    placeholder={sshEnv.env_host || window.location.hostname}
+                    placeholder={t('sys.sshHostPh')}
                     onChange={e => set('ssh_public_host', e.target.value)} style={{ ...input, fontFamily: 'var(--fmono)' }} />
                 <div style={hint}>
                     {tNodes('sys.sshHostHint', {
                         http: <code>http://</code>,
-                        fallback: sshEnv.env_host
-                            ? tNodes('sys.sshFromEnv', { host: <code>{sshEnv.env_host}</code>, var: <code>BASTION_PUBLIC_HOST</code>, file: <code>.env</code> })
+                        fallback: sshEnv.env_host_set
+                            ? tNodes('sys.sshFromEnv', { var: <code>BASTION_PUBLIC_HOST</code>, file: <code>.env</code> })
                             : t('sys.sshFromBrowser'),
                     })}
                 </div>

@@ -111,8 +111,7 @@ function LoginForm({ onLogin, notice, onGoRegister, onGoForgot }) {
 
     return (
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-light)', borderRadius: 16, padding: 32, boxShadow: '0 16px 48px rgba(0,0,0,0.3)' }}>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{t('login.title')}</div>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 24 }}>{t('login.subtitle')}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 24 }}>{t('login.title')}</div>
 
             {notice && (
                 <div style={{ padding: '8px 12px', background: 'var(--yellow-glow)', border: '1px solid var(--yellow)44', borderRadius: 6, color: 'var(--yellow)', fontSize: 12, marginBottom: 16, fontFamily: 'var(--fmono)' }}>

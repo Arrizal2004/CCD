@@ -20,7 +20,7 @@ const SETTINGS = {
     announcement: { text: '', level: 'info', starts_at: null, ends_at: null, show_on_login: false },
     default_vm_lease_days: null, default_account_days: null, ticket_categories: [{ key: 'OTHERS', label: '' }],
     vps_os_options: ['Ubuntu'], ssh_public_host: '', audit_retention_days: null, timezone: 'Asia/Jakarta', logo_version: null,
-    ssh_env: { enabled: true, env_host: 'ssh.lama.example', port: 2222 },
+    ssh_env: { enabled: true, env_host_set: true, env_host: 'ssh.rahasia.example', port: 2222 },
 };
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
@@ -31,8 +31,10 @@ describe('SystemSettingsPage: alamat SSH', () => {
         vi.mocked(api.saveSystemSettings).mockImplementation(async (body) => ({ ...body, ssh_public_host: body.ssh_public_host.trim().toLowerCase() }));
         render(<SystemSettingsPage />);
         const field = await screen.findByLabelText('Alamat SSH untuk pengguna');
-        expect(field.getAttribute('placeholder')).toBe('ssh.lama.example');
-        expect(screen.getByText(/ssh -J tunnel@ssh.lama.example:2222/)).toBeTruthy();
+        expect(field.getAttribute('placeholder')).toBe('mis. ssh.contoh.ac.id');          // contoh umum, bukan domain server
+        expect(screen.getByText(/ssh -J tunnel@<alamat-ssh>:2222/)).toBeTruthy();
+        expect(document.body.textContent).toContain('Kosong = nilai BASTION_PUBLIC_HOST di .env');
+        expect(document.body.textContent).not.toContain('ssh.rahasia.example');          // alamat dari .env tidak pernah ditampilkan
 
         fireEvent.change(field, { target: { value: 'SSH.Baru.Example' } });
         expect(screen.getByText(/ssh -J tunnel@SSH.Baru.Example:2222/)).toBeTruthy();
@@ -43,7 +45,7 @@ describe('SystemSettingsPage: alamat SSH', () => {
     });
 
     it('memberi tahu kalau bastion belum aktif', async () => {
-        vi.mocked(api.fetchSystemSettings).mockResolvedValue({ ...SETTINGS, ssh_env: { enabled: false, env_host: '', port: 2222 } });
+        vi.mocked(api.fetchSystemSettings).mockResolvedValue({ ...SETTINGS, ssh_env: { enabled: false, env_host_set: false, port: 2222 } });
         render(<SystemSettingsPage />);
         expect(await screen.findByText(/Bastion SSH belum diaktifkan/)).toBeTruthy();
     });
