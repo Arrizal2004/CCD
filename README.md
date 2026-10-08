@@ -9,9 +9,17 @@ Mahasiswa login, melihat VM yang ditugaskan kepadanya, lalu klik **Connect**. Se
 - Connect SSH dan RDP dari browser.
 - Akses per VM atau per group. Mahasiswa hanya melihat VM miliknya, tanpa nama host Proxmox.
 - Membuat VM dari template (clone dan cloud-init), snapshot dan rollback oleh mahasiswa, dan resize RAM, CPU, serta storage oleh admin. Resize hanya saat VM mati, dan storage hanya bisa diperbesar.
+- VM massal per kelas (satu VM per anggota grup, langsung di-assign, progres di latar belakang, kredensial CSV) dan Create VM yang terisi otomatis dari spek Infra Request mahasiswa.
 - Open Web: membuka aplikasi web yang berjalan di VM dari dalam dashboard. Alamat privat dimuat lewat proxy dashboard.
 - Tiket helpdesk, termasuk laporan langsung dari Detail VM, dan permintaan VM.
 - Tampilan dashboard dan Connect bisa dipakai dari smartphone dan tablet.
+- Dua bahasa, Indonesia dan Inggris, termasuk pesan galat dari server. Setiap pengguna memilih sendiri lewat tombol ID / EN.
+- Halaman Status: kesehatan layanan serta resource VPS dashboard, live dan riwayat 30 hari.
+- Masa sewa VM: VM dimatikan otomatis saat masa sewanya habis; mahasiswa bisa meminta perpanjangan lewat Helpdesk.
+- Akun: impor dari CSV (termasuk grup kelas), masa berlaku akun, aktifkan/nonaktifkan massal, dan reset password oleh admin. Pengguna yang lupa password bisa mengirim permintaan dari halaman login tanpa email.
+- Switch (jaringan) terisolasi per kelas dengan subnet sendiri, dibuat dari dashboard: internet lewat NAT dan tetap bisa di-Connect dari CCD. Switch berada di blok alamat per Proxmox yang bisa ditambah satu per satu; switch baru di blok yang sudah ada tidak perlu advertise route Tailscale lagi.
+- Akun OS di dalam VM lewat QEMU Guest Agent: membuat user untuk VM yang dipakai bersama, reset password untuk pengguna yang lupa, dan hapus user, tanpa SSH atau password lama.
+- Pengaturan Sistem untuk superadmin: nama, logo, warna aksen, bahasa bawaan (Indonesia/Inggris), pengumuman, aturan pendaftaran, nilai bawaan (masa sewa VM, masa berlaku akun), kategori tiket, pilihan OS di Infra Request, dan alamat SSH bastion. Setiap sekolah atau kampus bisa menyesuaikan dashboard tanpa mengubah kode.
 - SSH dari terminal sendiri (opsional): lewat bastion di VPS dengan SSH key, hanya ke VM milik pengguna. Bisa untuk `scp`, `sftp`, dan VS Code Remote-SSH.
 - Audit & Remote: activity log, sesi remote yang aktif, sesi Open Web yang bisa dicabut admin, dan riwayat SSH lewat bastion (siapa, dari IP mana, ke VM mana).
 
@@ -41,7 +49,7 @@ cd campus-cloud-dashboard
 
 `setup.sh` memasang Docker kalau belum ada, membuat `backend/.env` dengan secret dan password acak, membangun image satu per satu, lalu menjalankan semua container. Skrip ini aman dijalankan ulang dan tidak menimpa `.env` yang sudah ada.
 
-Setelah selesai, buka `http://<ip-server>` dan login sebagai `admin` dengan password yang dicetak di akhir proses. Password admin Guacamole juga dicetak sekali. Simpan keduanya.
+Setelah selesai, buka `http://<ip-server>` dan login sebagai `admin` dengan password yang dicetak di akhir proses. Password admin Guacamole juga dicetak sekali. Simpan keduanya. Nama sistem dan aturan pendaftaran bisa diubah di tab **Sistem**.
 
 Langkah berikutnya ada di [`docs/PANDUAN_DEPLOYMENT.md`](docs/PANDUAN_DEPLOYMENT.md):
 - Menghubungkan VPS ke Proxmox lewat Tailscale (Bagian 1.6).
@@ -72,10 +80,11 @@ cd frontend
 npm ci
 npm run dev      # http://localhost:5173
 npm run lint
+npm test         # test unit dan komponen (Vitest)
 npm run build
 ```
 
-CI di `.github/workflows/ci.yml` menjalankan test backend, lint, dan build frontend di setiap push dan pull request.
+CI di `.github/workflows/ci.yml` menjalankan test backend, lint, test, dan build frontend di setiap push dan pull request.
 
 ## Keamanan
 
@@ -84,7 +93,7 @@ CI di `.github/workflows/ci.yml` menjalankan test backend, lint, dan build front
 - Kredensial VM dan token Proxmox disimpan terenkripsi di database aplikasi. Saat Connect, kredensial juga diberikan ke Guacamole dan tersimpan di database Guacamole tanpa enkripsi tambahan dari CCD.
 - `setup.sh` membuat password admin, password database, dan semua secret secara acak, lalu membatasi izin `backend/.env` menjadi `600`.
 - Hanya port 80 yang dibuka ke luar. Backend, Guacamole, PostgreSQL, dan Redis hanya bisa dijangkau dari server itu sendiri atau dari jaringan Docker. Bastion SSH (port 2222) hanya terbuka kalau diaktifkan, hanya menerima SSH key, tidak memberi shell, dan hanya meneruskan ke VM yang diizinkan dashboard.
-- Login dibatasi: 5 kali gagal, akun terkunci 5 menit. Token JWT berlaku 8 jam dan dicabut saat logout.
+- Login dibatasi: 5 kali gagal, akun terkunci 5 menit. Token JWT berlaku 8 jam dan dicabut saat logout. Semua sesi akun berakhir saat password-nya diganti atau direset, dan password sementara dari admin wajib diganti saat login.
 - `/healthz` terbuka tanpa login, tetapi pesan error dan detail Proxmox hanya ditampilkan untuk admin.
 - Aktivitas penting tercatat di audit log. Isi sesi remote sengaja tidak direkam demi privasi.
 
@@ -96,13 +105,17 @@ Laporkan celah keamanan secara privat lewat tab **Security → Report a vulnerab
 
 - Login hanya dengan akun lokal dashboard.
 - Peran yang tersedia: superadmin, sysadmin, dan mahasiswa. Tidak ada kuota sumber daya per mahasiswa.
-- Akun tidak kedaluwarsa otomatis. Admin menonaktifkannya manual.
+- Reset password akun dashboard dilakukan admin; dashboard tidak mengirim email.
 - Hanya mendukung Proxmox VE.
 - Dipakai pada skala satu lab praktikum.
 
 ## Status
 
 Prototype yang sudah berjalan di lab praktikum. Proyek ini berawal sebagai proyek riset dan dibawakan di openSUSE Summit Asia 2026.
+
+## Berkontribusi dan keamanan
+
+Panduan kontribusi ada di [CONTRIBUTING.md](CONTRIBUTING.md). Celah keamanan dilaporkan secara privat; lihat [SECURITY.md](SECURITY.md).
 
 ## Lisensi
 

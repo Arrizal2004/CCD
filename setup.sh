@@ -105,6 +105,29 @@ ensure_bastion_token() {
 }
 gen_password() { openssl rand -base64 18 | tr -dc 'A-Za-z0-9' | cut -c1-20; }
 
+# Jaringan yang dipakai VPS ini (alamat interface dan route), format "iface=cidr,...". Backend berjalan
+# di container dan tidak bisa melihatnya sendiri; dengan daftar ini blok alamat switch yang bentrok
+# dengan jaringan VPS (mis. jaringan privat provider) ditolak. Diperbarui setiap setup.sh dijalankan.
+host_networks() {
+    {
+        ip -4 -o addr show 2>/dev/null | awk '$2 != "lo" && $2 !~ /^tailscale/ {print $2 "=" $4}'
+        ip -4 route show table main 2>/dev/null | awk '$1 != "default" && $0 !~ / dev tailscale/ {
+            dst = $1; if (dst !~ /\//) dst = dst "/32"
+            for (i = 1; i <= NF; i++) if ($i == "dev") print $(i + 1) "=" dst }'
+    } | sort -u | paste -sd, -
+}
+
+ensure_host_networks() {
+    local env_file="$1" nets
+    nets="$(host_networks)"
+    [ -n "$nets" ] || return 0
+    if grep -q '^HOST_NETWORKS=' "$env_file"; then
+        sed -i "s#^HOST_NETWORKS=.*#HOST_NETWORKS=${nets}#" "$env_file"
+    else
+        printf '\n# Diisi otomatis oleh setup.sh: jaringan VPS ini, supaya blok alamat switch tidak bentrok.\nHOST_NETWORKS=%s\n' "$nets" >> "$env_file"
+    fi
+}
+
 GENERATED_GUAC_PASS=""
 GENERATED_ADMIN_PASS=""
 DETECTED_HOST=""
@@ -117,6 +140,7 @@ setup_env() {
     if [ -f "$env_file" ]; then
         log "backend/.env sudah ada — dipakai apa adanya (tidak ditimpa)."
         ensure_bastion_token "$env_file"
+        ensure_host_networks "$env_file"
         return
     fi
     if [ ! -f "$BACKEND_DIR/.env.example" ]; then
@@ -143,6 +167,7 @@ setup_env() {
     sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=$(openssl rand -hex 24)#" "$env_file"
     ensure_bastion_token "$env_file"
     sed -i "s#^GUAC_DB_PASSWORD=.*#GUAC_DB_PASSWORD=$(openssl rand -hex 24)#"   "$env_file"
+    ensure_host_networks "$env_file"
     chmod 600 "$env_file"
 
     GENERATED_GUAC_PASS="$guac_pass"
@@ -212,10 +237,33 @@ setup_backup_cron() {
     log "Cron terpasang. Uji manual kapan saja: sudo ${SCRIPT_DIR}/backend/scripts/backup-db.sh"
 }
 
+# VPS kecil tanpa swap: saat RAM penuh (build image, banyak sesi Guacamole) kernel mematikan proses
+# secara acak. Swapfile 2 GB dibuat sekali, hanya kalau RAM < 4 GB, belum ada swap, dan disk cukup.
+ensure_swap() {
+    if [ -n "$(swapon --show --noheadings 2>/dev/null)" ]; then return 0; fi
+    local mem_mb free_mb
+    mem_mb=$(awk '/MemTotal/ {print int($2 / 1024)}' /proc/meminfo)
+    [ "$mem_mb" -ge 4096 ] && return 0
+    free_mb=$(df -Pm / | awk 'NR == 2 {print $4}')
+    if [ "$free_mb" -lt 6144 ]; then
+        warn "RAM ${mem_mb} MB tanpa swap, tetapi disk kosong < 6 GB. Swap tidak dibuat."
+        return 0
+    fi
+    log "RAM ${mem_mb} MB tanpa swap: membuat swapfile 2 GB di /swapfile..."
+    $SUDO fallocate -l 2G /swapfile 2>/dev/null || $SUDO dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
+    $SUDO chmod 600 /swapfile
+    $SUDO mkswap /swapfile >/dev/null
+    $SUDO swapon /swapfile
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | $SUDO tee -a /etc/fstab >/dev/null
+    echo 'vm.swappiness=10' | $SUDO tee /etc/sysctl.d/99-ccd-swap.conf >/dev/null
+    $SUDO sysctl -p /etc/sysctl.d/99-ccd-swap.conf >/dev/null 2>&1 || true
+}
+
 main() {
     check_docker
     setup_env
     check_port80
+    ensure_swap
     deploy
     wait_healthy
     setup_backup_cron

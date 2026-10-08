@@ -26,7 +26,8 @@ Skrip ini otomatis:
 2. Buat `backend/.env` dari `.env.example`. Semua secret dan password dibuat acak dengan `openssl rand`: `JWT_SECRET`, `AGENT_ENC_SECRET`, `GUAC_ADMIN_PASS`, `INITIAL_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`, `GUAC_DB_PASSWORD`, dan `BASTION_TOKEN`. `ALLOWED_ORIGINS` diisi dari IP server yang terdeteksi. File ini diberi izin `600`.
 3. Memastikan port 80 kosong, membangun image backend lalu frontend satu per satu, menjalankan semua container, dan menunggu backend siap.
 4. Memasang cron backup database harian (Bagian 9).
-5. Mencetak ringkasan: URL dashboard, password admin dashboard, dan password admin Guacamole. Keduanya hanya dicetak sekali, jadi simpan.
+5. Kalau RAM server di bawah 4 GB dan belum ada swap, membuat swapfile 2 GB (`/swapfile`), supaya container tidak dimatikan kernel saat RAM penuh.
+6. Mencetak ringkasan: URL dashboard, password admin dashboard, dan password admin Guacamole. Keduanya hanya dicetak sekali, jadi simpan.
 
 **Idempotent** — aman dijalankan ulang kapan saja (redeploy setelah `git pull`, misalnya): tidak akan reinstall Docker yang sudah ada, dan tidak akan menimpa `backend/.env` yang sudah ada.
 
@@ -65,7 +66,6 @@ Variabel **opsional**:
 | Variabel | Kapan diisi |
 |---|---|
 | `AGENT_ENC_SECRET` | `openssl rand -hex 32` — mengaktifkan enkripsi payload Redis. Kosongkan kalau tidak perlu (mode kompatibel, tetap aman untuk kredensial karena itu sudah dienkripsi lewat `JWT_SECRET` di atas). |
-| `TAILSCALE_API_KEY`, `TAILSCALE_TAILNET` | Hanya kalau mau integrasi API Tailscale dari dashboard. **Rekomendasi kami: lewati ini** — atur Tailscale langsung di level OS VPS (`tailscale up`), bukan lewat dashboard. Lihat catatan di Bagian 7. |
 | `COMPOSE_PROFILES`, `BASTION_*` | Hanya kalau mengaktifkan SSH lewat bastion. Lihat Bagian 8. |
 
 Contoh `.env` minimal:
@@ -111,6 +111,18 @@ Buka `http://<ip-vps>` di browser dan login sebagai `admin`. Akun ini dibuat oto
 
 Ganti password setelah login pertama lewat menu Profil (pojok kanan atas). Ini wajib kalau Anda memakai `admin123`, karena password itu tertulis di kode sumber.
 
+Lalu buka tab **Sistem** (khusus superadmin) untuk menyesuaikan dashboard dengan sekolah atau kampus Anda:
+- **Identitas dan tampilan:** nama sistem, nama singkat (header di HP), nama institusi, tagline, logo (PNG/JPG/WebP, maks 512 KB), dan warna aksen. Dipakai di judul dan ikon tab browser, halaman login, header, footer, dan jendela Tentang. Warna yang terlalu gelap ditolak supaya teks di tombol tetap terbaca.
+- **Bahasa dan tema bawaan:** bahasa Indonesia atau Inggris, tema gelap, terang, atau ikuti perangkat pengguna. Setiap pengguna, termasuk yang belum punya akun di halaman login, bisa mengganti lewat tombol **ID / EN** dan **☀️ / 🌙**; pilihannya disimpan di browser masing-masing. Seluruh halaman dan pesan galat dari server mengikuti bahasa pilihan pengguna. Catatan yang sudah tersimpan, seperti Activity Log dan pesan sistem di tiket, tetap dalam bahasa saat dicatat.
+- **Pengumuman:** teks dengan jenis Info, Peringatan, atau Penting, bisa diberi waktu tampil, dan bisa ditampilkan juga di halaman login. Pengguna bisa menutup pengumuman Info dan Peringatan.
+- **Nilai bawaan:** masa sewa untuk VM baru (terisi otomatis di form Create VM) dan masa berlaku untuk akun baru (pendaftaran mandiri dan baris impor CSV tanpa `expires_at`).
+- **Kategori tiket Helpdesk:** ganti nama, tambah, atau hapus. *Perpanjang Sewa* dan *Lainnya* selalu ada karena dipakai sistem.
+- **Alamat SSH untuk pengguna:** nama host atau IP bastion SSH yang tampil di perintah SSH mahasiswa (Bagian 8). Ganti di sini kalau domain berubah, tanpa menyunting `.env`.
+- **Pilihan OS di Infra Request:** daftar OS yang bisa dipilih mahasiswa saat mengajukan VPS (bawaan: Windows dan Ubuntu). Bisa ditambah, diganti nama, diurutkan, atau dihapus, minimal satu. Yang paling atas terpilih otomatis. Request lama tetap menampilkan OS yang dipilih waktu itu.
+- **Pendaftaran mandiri:** bisa dibuka atau ditutup. Daftar email yang diizinkan berisi satu aturan per baris: `@kampus.ac.id` menerima semua email di domain itu termasuk subdomainnya (mis. `@student.kampus.ac.id`), alamat lengkap hanya menerima email itu. Kalau daftar kosong, email apa pun diterima dan email tetap opsional. Halaman login hanya menampilkan domainnya, bukan alamat perorangan.
+
+Dashboard tidak mengirim email verifikasi, jadi daftar email hanya menyaring email yang diketik. Akses penuh tetap menunggu verifikasi admin (lewat Infrastructure Request). Satu email hanya bisa dipakai satu akun. Setiap perubahan pengaturan tercatat di Activity Log.
+
 ### 1.6 Menghubungkan VPS ke Proxmox lewat Tailscale
 VPS dashboard harus bisa menjangkau API Proxmox (port 8006) dan IP setiap VM (untuk SSH, RDP, dan Open Web). Kalau VPS dan Proxmox tidak satu jaringan, cara yang kami pakai adalah Tailscale dengan subnet route. Perintah dijalankan sebagai root.
 
@@ -137,6 +149,8 @@ VPS dashboard harus bisa menjangkau API Proxmox (port 8006) dan IP setiap VM (un
    ```
 
 Kalau tailnet memakai ACL kustom, pastikan VPS diizinkan mengakses subnet itu. Saat mendaftarkan Proxmox ke dashboard (Bagian 3), isi Host dengan IP tailnet Proxmox, bukan IP LAN-nya.
+
+Kalau nanti memakai fitur Switch (Bagian 5.6), blok alamat switch ikut diiklankan dengan cara yang sama oleh skrip penyiapan host: sekali per blok, bukan per switch.
 
 ---
 
@@ -213,13 +227,13 @@ Catatan: ACL eksplisit tetap diperlukan walaupun tokennya milik `root@pam`, kare
 
 1. Login ke CCD sebagai admin/superadmin.
 2. Buka tab **Integrations** (menu atas, hanya muncul untuk superadmin/sysadmin).
-3. **Manage Instances** → **+ Add Instance**.
+3. **Kelola Instance** → **+ Tambah Instance**.
 4. Isi:
    - **Label**: nama bebas, mis. `lab` (dipakai internal sebagai identifier, tidak tampil ke mahasiswa).
    - **Host**: `<ip-proxmox>:8006`.
    - **Token ID**: dari langkah 2.2, mis. `root@pam!ccd-dashboard`.
    - **Token Secret**: dari langkah 2.2.
-   - **Verify SSL**: matikan kalau Proxmox pakai sertifikat self-signed (default Proxmox baru install).
+   - **Verifikasi sertifikat SSL**: matikan kalau Proxmox pakai sertifikat self-signed (default Proxmox baru install).
 5. Simpan. Dashboard langsung mencoba konek — kalau berhasil, node & VM di dalam pool `campus-cloud` akan muncul di tab **Servers**.
 
 Kalau gagal konek, cek lagi: token ID/secret benar, ACL pool sudah di-grant (Bagian 2.3), dan port 8006 Proxmox bisa dijangkau dari VPS dashboard (`curl -k https://<ip-proxmox>:8006` dari VPS).
@@ -271,8 +285,12 @@ Template siap. Cek dari dashboard: **Servers → + Create VM** — template ini 
 
 ### 5.1 Assign VM ke Mahasiswa
 Supaya mahasiswa bisa melihat & connect ke VM ini:
-- **Per-VM langsung**: buka detail VM → tab *Assignments* → tambahkan user.
+- **Per-VM langsung**: buka detail VM → tab *Penugasan* → tambahkan user.
 - **Lewat Group** (direkomendasikan untuk satu kelas): tab **Groups** → buat group → tambahkan anggota (mahasiswa) → tambahkan VM ke group. Semua anggota otomatis dapat akses ke semua VM di group itu.
+
+**VM massal per kelas.** Di Servers, pilih Proxmox dan node lalu klik **⧉ VM Massal**. Pilih grup kelas, template, spek tiap VM, jaringan (switch atau bridge template dengan DHCP), username OS (username tiap mahasiswa atau satu username untuk semua), masa sewa, dan apakah VM langsung dinyalakan. **Lihat rencana** menampilkan nama VM per mahasiswa, nama yang bentrok (otomatis tidak dicentang), kebutuhan RAM dibanding RAM kosong node, dan sisa IP switch. Setelah **Buat**, VM dibuat satu per satu di latar belakang lewat jalur yang sama dengan Create VM dan langsung di-assign ke mahasiswanya. Jendela boleh ditutup; progres bisa dibuka lagi dari tombol yang sama. VM yang gagal bisa diulang, dan batch yang terputus karena backend berhenti bisa dilanjutkan. Password OS dibuat acak per VM dan bisa diunduh sebagai CSV (tercatat di Activity Log); mahasiswa tidak memerlukannya untuk Connect.
+
+**Dari Infra Request.** Di detail request VPS, **Buat VM sesuai request** membuka Create VM yang sudah terisi spek permintaan mahasiswa (vCPU, RAM, disk), template yang namanya cocok dengan OS yang diminta, nama `vps-<username>`, dan password acak; admin tinggal memilih Proxmox dan node. VM yang dibuat langsung tertaut ke request. Untuk menautkan VM yang sudah ada, ketik nama, VMID, CCDID, atau host di kotak pencarian. Saat request dikonfirmasi **Selesai**, VM yang tertaut otomatis di-assign ke mahasiswa yang meminta.
 
 ### 5.2 Ubah RAM / CPU / Storage (Resize)
 Hanya superadmin dan sysadmin. Tombol **Resize** di daftar VM aktif kalau VM sudah **mati** (status `stopped`):
@@ -282,6 +300,87 @@ Hanya superadmin dan sysadmin. Tombol **Resize** di daftar VM aktif kalau VM sud
 - Setiap perubahan tercatat di Activity Log.
 
 ---
+
+### 5.3 Masa Sewa VM
+Setiap VM bisa diberi batas masa sewa: di form **Create VM** (kolom *Masa sewa*), atau kapan saja lewat Detail VM, bar **Masa sewa**: **+7 hari**, **+30 hari**, **−7 hari**, pilih tanggal, atau **Tanpa batas**. Menambah hari pada sewa yang sudah habis dihitung dari hari ini. Kolom **Sewa** di daftar VM menampilkan sisa harinya: kuning kalau tinggal 3 hari atau kurang, merah kalau habis.
+
+Saat masa sewa habis, VM yang masih menyala dimatikan otomatis (shutdown biasa, dipaksa mati kalau 2 menit tidak merespons). Mahasiswa tidak bisa menyalakannya lagi; admin tetap bisa. Data di dalam VM tidak dihapus. Mahasiswa bisa meminta perpanjangan lewat Detail VM → **Minta perpanjangan**, yang membuat tiket Helpdesk kategori *Perpanjang Sewa*. Setelah admin menambah masa sewa, VM bisa dinyalakan lagi. Semua perubahan dan pematian otomatis tercatat di Activity Log.
+
+### 5.4 Akun Mahasiswa: Impor, Masa Berlaku, dan Aksi Massal
+Di tab **Users** (superadmin):
+- **Impor CSV** membuat banyak akun sekaligus. Kolom: `username, full_name, email, password, role, expires_at, group`; hanya `username` dan `full_name` yang wajib. Password kosong dibuatkan acak dan bisa diunduh sekali setelah impor. `group` (nama grup yang sudah ada) langsung memasukkan akun ke grup kelasnya. Semua baris dicek dulu; kalau satu saja salah, tidak ada akun yang dibuat. Template CSV bisa diunduh dari jendela impor. Akun hasil impor langsung terverifikasi.
+- **Masa berlaku akun** diatur per akun (Edit) atau massal. Setelah lewat, akun tidak bisa login, token lamanya ditolak, dan sesi remote-nya diputus. Memperpanjang masa berlaku langsung memulihkan aksesnya.
+- **Aksi massal**: centang akun (atau saring dengan filter grup lalu centang semua), lalu **Aktifkan**, **Nonaktifkan**, **Atur masa berlaku**, atau **Tanpa batas**. Akun Anda sendiri tidak ikut diubah.
+
+Menonaktifkan akun, mengubah masa berlakunya, atau menghapusnya langsung berlaku: dashboard memeriksa status akun di setiap permintaan, bukan hanya saat login.
+
+**Lupa password akun dashboard.** Dashboard tidak mengirim email, jadi password direset oleh admin:
+- Di tab **Users**, tombol **🔑 Reset** (superadmin, untuk semua akun selain akunnya sendiri) atau **🔑 Reset password** (sysadmin, hanya akun mahasiswa) membuat password sementara acak. Password itu hanya ditampilkan sekali. Berikan langsung ke pemilik akun.
+- Begitu direset, password lama dan semua sesi login akun itu berakhir, sesi remote yang sedang berjalan diputus, dan kuncian karena salah password dihapus. Saat login dengan password sementara, pengguna langsung diminta membuat password baru. Sebelum menggantinya, ia belum bisa memakai fitur lain, termasuk Connect. Akunnya ditandai *Wajib ganti password* di daftar Users.
+- Halaman login punya tautan **Lupa password?**. Pengguna mengisi username dan pesan opsional (mis. kelas atau cara menghubunginya). Permintaannya muncul di bagian atas tab **Users**, lengkap dengan tombol **Reset password** dan **Abaikan**, dan jumlahnya tampil sebagai angka merah di tab itu. Sysadmin hanya melihat permintaan dari akun mahasiswa.
+- Jawaban di halaman login selalu sama, terdaftar atau tidak, jadi form ini tidak bisa dipakai untuk menebak username. Satu IP dibatasi 10 permintaan per jam. Siapa pun bisa mengirim permintaan untuk username apa pun, jadi pastikan yang meminta memang pemilik akunnya sebelum memberikan password sementara.
+- Mengganti password sendiri lewat Profil juga mengakhiri sesi di perangkat lain. Hal yang sama terjadi saat superadmin mengganti password atau peran akun lewat **Edit**.
+- Kalau satu-satunya superadmin lupa password, reset dari server:
+  ```bash
+  cd backend && sudo docker compose exec backend python scripts/reset_password.py admin
+  ```
+  Perintah ini mencetak password sementara yang wajib diganti saat login.
+
+### 5.5 VM Dipakai Bersama, Akun OS, dan Reset Password
+Satu VM bisa dipakai banyak mahasiswa, masing-masing dengan akun OS sendiri. Cara mereka masuk saat **Connect** diatur di tab **Groups** → VM milik grup → *Mode Koneksi*:
+- **Login Mandiri**: mahasiswa mengetik username dan password akun OS-nya sendiri.
+- **Kredensial Grup**: semua anggota masuk dengan satu akun OS yang sama.
+
+Akun OS juga bisa dipasangkan langsung ke seorang mahasiswa di Detail VM → tab *Penugasan*. Connect-nya langsung masuk tanpa mengetik.
+
+Akun OS dikelola di Detail VM → tab **Akun OS** (superadmin dan sysadmin):
+- **Tambah** dengan centang *Buat juga user ini di dalam VM*: user Linux baru dibuat di dalam VM dengan folder home sendiri, tanpa hak sudo. Password yang dikosongkan dibuatkan acak dan ditampilkan sekali. Tanpa centang, akun hanya dicatat di dashboard dan user-nya harus sudah ada di dalam VM.
+- **Reset password**, untuk pengguna yang lupa password. Password lama tidak diperlukan.
+- **Hapus**: hanya dari dashboard, atau sekalian dari dalam VM (folder home dan isinya ikut terhapus). User yang masih dipakai untuk Login Connect atau kredensial grup tidak dihapus dari VM.
+
+User Login Connect sebuah VM bisa direset di Detail VM → tab Info → **Reset password**. Form Kredensial Grup juga punya centang *Buat atau perbarui akun ini di dalam VM*.
+
+Aksi di dalam VM memakai QEMU Guest Agent, jadi tidak perlu SSH atau jaringan di dalam VM. Syaratnya VM menyala dan agent berjalan (Bagian 4). Token dari Bagian 2.3 sudah punya izin Guest Agent yang dibutuhkan.
+- Di distro dengan SELinux aktif (mis. openSUSE Leap 16, Fedora, Rocky/RHEL), SELinux membatasi Guest Agent sehingga tidak bisa membuat user atau mengganti password. Dashboard lalu otomatis memakai SSH dengan Login Connect VM itu, yang harus punya sudo (user cloud-init bawaan sudah punya). Jalur yang sama dipakai kalau agent tidak merespons. Password dikirim lewat stdin `chpasswd`, tidak lewat argumen perintah.
+- Saat ini hanya untuk VM Linux. Password VM Windows diganti lewat RDP atau console Proxmox.
+- Hanya akun pengguna biasa (UID 1000 ke atas) yang bisa diubah. Root dan akun sistem tidak bisa.
+- Setelah password berubah, semua salinan yang disimpan dashboard untuk user itu ikut diperbarui, jadi tombol Connect tetap jalan.
+- Setiap aksi tercatat di Activity Log, tanpa password-nya.
+
+### 5.6 Switch: Jaringan Terisolasi per Kelas
+Di tab **Topology**, tombol **＋ Switch** (superadmin dan sysadmin) membuka pengelola switch, yaitu jaringan virtual dengan subnet sendiri di sebuah Proxmox. Berbeda dengan `vmbr0` (bridge bawaan Proxmox yang tersambung ke kartu jaringan fisik, jadi VM di sana langsung berada di LAN kampus), switch tidak tersambung ke kartu fisik; lalu lintasnya lewat host Proxmox. VM di sebuah switch:
+- bisa saling terhubung, dan bisa di-Connect, dibuka lewat Open Web, serta diakses lewat SSH dari CCD;
+- bisa ke internet lewat NAT host Proxmox (bisa dimatikan per switch);
+- tidak bisa menjangkau switch lain, jaringan kampus (termasuk VM di `vmbr0`), tailnet, atau host Proxmox.
+
+**Blok alamat.** Setiap switch berada di salah satu blok alamat Proxmox-nya. Satu Proxmox bisa punya beberapa blok, jadi Anda cukup mencadangkan rentang yang memang dipakai, mis. `192.168.111.0/24` lalu `192.168.112.0/24`, atau satu blok besar seperti `10.111.0.0/16`. Host Proxmox mengiklankan setiap blok lewat Tailscale. Switch baru di blok yang sudah ada langsung terjangkau dari VPS; kosongkan subnet-nya supaya /24 kosong berikutnya terisi otomatis.
+
+Blok baru bisa ditambah dua cara: lewat **Tambah blok** di pengelola switch, atau dengan mengisi subnet switch di luar blok yang ada lalu mencentang **Tambahkan sebagai blok alamat baru**. Blok yang memuat blok lama (mis. `192.168.96.0/19` untuk `192.168.111.0/24`) menggantikannya. Blok hanya bisa dihapus kalau tidak ada switch di dalamnya. Setiap kali blok ditambah atau dihapus, jalankan ulang skrip di host (lihat di bawah) dan, untuk blok baru, setujui route-nya di Tailscale. Sebelum itu switch di blok baru belum terjangkau dari CCD, tapi sudah terisolasi.
+
+Pilih rentang yang tidak dipakai jaringan kampus; tanyakan ke pengelola jaringan kalau ragu. Dashboard hanya bisa menolak blok yang bertabrakan dengan jaringan yang ia ketahui: LAN Proxmox, blok Proxmox lain, rentang Docker (172.17.x sampai 172.31.x), dan jaringan VPS. Jaringan VPS dicatat `setup.sh` ke `HOST_NETWORKS` di `backend/.env` setiap kali dijalankan, karena backend di dalam container tidak bisa melihatnya sendiri.
+
+**Menyiapkan host Proxmox: sekali per host, lalu setiap kali blok berubah.** Pengelola switch menampilkan perintahnya, sudah terisi semua blok dan Token ID:
+```bash
+curl -fsSL https://<domain-dashboard>/api/v1/networks/setup-script -o ccd-net-setup.sh
+bash ccd-net-setup.sh --pool 192.168.111.0/24,192.168.112.0/24 --token 'root@pam!ccd-dashboard'
+```
+Skrip ini aman dijalankan ulang dan melakukan lima hal:
+1. Membuat SDN zone tipe Simple bernama `ccd`.
+2. Memberi token CCD izin mengelola VNet di zone itu dan menerapkan konfigurasi SDN. Token tidak mendapat izin atas zone lain.
+3. Memasang aturan isolasi nftables (`nft list table inet ccd_net`) lewat layanan `ccd-net.service`, supaya tetap aktif setelah reboot. Aturannya mengenali switch dari nama bridge-nya (`ccd…`), jadi switch di blok yang baru ditambahkan langsung terisolasi.
+4. Menjalankan penerus DNS `ccd-dns.service` (dnsmasq) yang hanya mendengarkan di bridge switch, tanpa DHCP.
+5. Mengatur route Tailscale: blok yang belum diiklankan ditambahkan, dan blok yang dulu dipasang skrip ini tapi sudah dihapus dari dashboard dicabut. Route lain (mis. LAN `vmbr0`) tetap ada. Blok lama yang tercakup blok baru yang lebih besar tidak dicabut supaya switch-nya tidak putus sebelum route baru disetujui. Skrip bertanya dulu sebelum mengubah route.
+
+Setelah itu setujui route blok baru di admin console Tailscale (Machines → host Proxmox → Edit route settings). Supaya langkah ini otomatis, beri host Proxmox sebuah tag dan tambahkan `autoApprovers` di policy Tailscale. Route di dalam rentang itu lalu disetujui sendiri:
+```json
+"tagOwners":     { "tag:proxmox": ["autogroup:admin"] },
+"autoApprovers": { "routes": { "192.168.0.0/16": ["tag:proxmox"] } }
+```
+Pasang tag-nya dengan `tailscale up --advertise-tags=tag:proxmox` di host (atau dari admin console), dan pastikan aturan akses di policy tetap mengizinkan VPS menjangkau perangkat bertag itu. Syaratnya `ifupdown2` terpasang dan `/etc/network/interfaces` memuat baris `source /etc/network/interfaces.d/*` (bawaan Proxmox 8 ke atas). Untuk melepas aturan isolasi dan penerus DNS: `bash ccd-net-setup.sh --remove`.
+
+**Membuat VM di switch.** Servers → Create VM → *Sambungkan ke* → pilih switch. IP dibagikan otomatis atau diisi sendiri, dan gateway sekaligus DNS-nya adalah host Proxmox (`x.x.x.1`). Host meneruskan DNS itu ke DNS yang dipakainya sendiri lewat penerus `ccd-dns.service`, karena jaringan kampus sering memblokir DNS publik dan DNS kampus berada di jaringan privat yang ditutup untuk switch. Switch tidak punya DHCP.
+
+**Batasan.** Switch hanya berlaku di satu Proxmox. Switch yang masih dipakai VM tidak bisa dihapus. Bagian Kesiapan di pengelola switch menunjukkan zone, izin token, dan apakah CCD bisa menjangkau setiap switch. Kalau belum terjangkau, biasanya skrip belum dijalankan ulang dengan blok itu atau route-nya belum disetujui di Tailscale. Topology menampilkan switch (oranye) dengan nama dan subnetnya, termasuk yang belum punya VM, dan setiap kartu jaringan VM sebagai garis ke switch atau bridge-nya; klik switch lalu **Kelola switch** untuk mengubahnya.
 
 ## 6. Connect
 
@@ -317,16 +416,26 @@ Tab **Open Web**: ketik alamat web lalu klik **Buka**, halaman tampil di dalam d
 - Web yang memakai path absolut (`/static/...`) atau sangat bergantung pada cookie bisa tampil tidak lengkap. Web yang melarang di-embed (`X-Frame-Options`) tampil kosong untuk alamat publik.
 
 ### Sebagai admin — memantau sesi
-- Tab **Audit & Remote → Remote Sessions**: lihat siapa yang sedang connect ke VM mana, bisa paksa putus sesi (*Kill Session*).
-- Tab **Audit & Remote → Web Sessions**: link Open Web yang aktif dan riwayatnya (user, IP target, IP pengakses, jumlah request). IP pengakses kuning berarti link dipakai dari lebih dari satu IP. *Kill Link* mematikan link itu seketika. Jumlah request hanya perkiraan.
-- Tab **Audit & Remote → SSH Sessions** (muncul kalau bastion aktif, Bagian 8): siapa yang SSH lewat bastion, dari IP mana, ke VM mana, durasi, dan jumlah data.
-- Tab **Audit & Remote → Activity Log**: riwayat semua aksi penting (login, create/delete VM, resize, Open Web, SSH, dst).
+- Tab **Audit & Remote → Activity Log**: riwayat semua aksi penting, termasuk login, VM, resize, Open Web, SSH, perubahan akun (buat, ubah peran/status/email/masa berlaku, hapus), perubahan grup dan anggotanya, serta tambah/ubah/hapus instance Proxmox. Bisa disaring per kata, per akun, per jenis aksi, per tingkat, dan per tanggal. **⬇ Ekspor CSV** mengunduh hasil saringan itu (maks. 50.000 baris, waktu dalam WIB). Daftar dimuat ulang otomatis tiap 15 detik hanya di halaman 1, supaya baris tidak bergeser saat membaca halaman berikutnya.
+- Tab **Audit & Remote → Login Gagal**: rekap login gagal 1, 7, atau 30 hari terakhir, per akun dan per IP. Akun yang sedang terkunci (5 kali gagal dalam 5 menit) ditandai. Satu IP yang mencoba banyak akun berbeda patut dicurigai.
+- Tab **Audit & Remote → Sesi Remote**: siapa yang sedang connect ke VM mana, protokolnya, dan dari IP mana. Riwayatnya dibaca langsung dari database Guacamole, jadi tidak terbatas jumlah, bisa dicari per user atau VM, dan bisa diekspor. Sesi yang dibuka sebelum versi ini tidak menampilkan IP, karena yang tercatat waktu itu adalah IP container backend.
+- Tab **Audit & Remote → Sesi Web**: link Open Web yang aktif dan riwayatnya (user, IP target, IP pengakses, jumlah request). IP pengakses kuning berarti link dipakai dari lebih dari satu IP. *Cabut Link* mematikan link itu seketika. Jumlah request hanya perkiraan.
+- Tab **Audit & Remote → Sesi SSH** (muncul kalau bastion aktif, Bagian 8): siapa yang SSH lewat bastion, dari IP mana, ke VM mana, durasi, dan jumlah data.
+- Klik nama pengguna di tab mana pun (atau tombol **📋 Aktivitas** di halaman Users) untuk melihat semua catatannya di satu jendela: Activity Log, sesi Remote, link Open Web, dan sesi SSH.
+
+**Memutus sesi.** *Putuskan Sesi* (Remote, SSH) dan *Cabut Link* (Web) menanyakan apa yang dilakukan sesudahnya:
+- **Putuskan saja**: pengguna bisa langsung menyambung lagi.
+- **Putuskan dan cabut akses ke VM ini** (Remote): penugasan VM itu dihapus dari pengguna. Kalau aksesnya berasal dari grup, dashboard menolak dan menyebut grupnya; keluarkan pengguna dari grup itu di halaman Groups.
+- **Putuskan dan nonaktifkan akun**: akun dinonaktifkan dan semua sesi Remote, Web, dan SSH-nya ikut diputus. Aktifkan lagi lewat halaman Users. Sysadmin hanya bisa melakukannya untuk akun mahasiswa.
+
+Pilihan yang tidak bisa dijalankan ditolak sebelum sesinya diputus. Semua tindakan ini tercatat di Activity Log beserta nama akun dan VM-nya.
+- Tab **Status**: kesehatan layanan, dan resource VPS tempat dashboard berjalan (CPU, RAM, disk, load, jaringan). Angka live diperbarui tiap 5 detik; riwayatnya disimpan per menit selama 30 hari (1 jam, 24 jam, 7 hari, 30 hari). Angka jaringan VPS dibaca dari `/proc/1/net/dev` host yang di-mount read-only ke backend.
 
 ---
 
 ## 7. (Opsional) Akses dari Luar Jaringan — Tailscale
 
-Kalau VPS dashboard perlu diakses dari luar jaringan lokalnya (mis. mahasiswa dari rumah), pasang **Tailscale langsung di level OS VPS**, bukan lewat dashboard (panel Tailscale di dashboard sengaja disembunyikan — fungsinya cuma untuk kelola ACL tailnet lewat API, bukan untuk mendaftarkan mesin ke tailnet).
+Kalau VPS dashboard perlu diakses dari luar jaringan lokalnya (mis. mahasiswa dari rumah), pasang **Tailscale langsung di level OS VPS**. Dashboard tidak mengelola Tailscale sendiri (tidak ada panel atau kunci API Tailscale); aturan akses tailnet diatur di admin console Tailscale.
 
 ```bash
 curl -fsSL https://tailscale.com/install.sh | sh
@@ -348,6 +457,80 @@ Kedua mode otomatis dapat sertifikat HTTPS valid dan URL bersih (`https://<hostn
 
 Dengan mode Funnel, halaman login bisa dicoba siapa saja di internet. Pastikan password admin bukan `admin123` (Bagian 1.5). Pembatasan login sudah aktif: 5 kali gagal, akun terkunci 5 menit.
 
+### 7.1 VPS privat dengan domain
+
+Dashboard tidak butuh IP publik: semua komponennya berjalan di Docker di satu mesin, dan nginx di dalamnya hanya melayani HTTP di port 80. Domain berguna untuk alamat yang mudah diingat dan HTTPS. Pilih jalur sesuai siapa yang mengakses:
+
+| Pengguna | Jalur | HTTPS dari |
+|---|---|---|
+| Hanya di LAN atau VPN | **A.** Domain menunjuk ke IP privat | Caddy dengan sertifikat DNS-01 |
+| Dari internet, VPS tanpa port terbuka | **B.** Cloudflare Tunnel | Cloudflare |
+| Perangkat yang login Tailscale | **C.** Domain menunjuk ke IP Tailscale | Caddy dengan sertifikat DNS-01 |
+
+Untuk ketiganya, isi `ALLOWED_ORIGINS` di `backend/.env` dengan alamat yang dipakai pengguna (mis. `https://dashboard.<domain>`), lalu `cd backend && sudo docker compose up -d backend`. Kalau salah, login gagal karena CORS.
+
+**A dan C: domain ke IP privat, HTTPS dengan Caddy.** Buat record DNS `A` untuk `dashboard.<domain>` ke IP privat VPS (jalur A, mis. `10.20.0.5`) atau ke IP Tailscale VPS (jalur C, `100.x.y.z`, lihat `tailscale ip -4`). Record yang menunjuk ke IP privat tidak bisa dibuka dari internet, tetapi namanya tetap terlihat publik; pakai DNS internal kalau nama itu tidak boleh terlihat. Jangan memakai `CNAME` ke alamat `.ts.net` untuk jalur C: sertifikat Tailscale hanya berlaku untuk nama `.ts.net`, jadi browser akan memperingatkan sertifikat tidak cocok.
+
+Let's Encrypt biasanya memeriksa lewat port 80 atau 443 dari internet, yang tidak mungkin di VPS privat. Pakai tantangan **DNS-01**: Caddy membuat record TXT lewat API penyedia DNS, tanpa port terbuka. Contoh untuk DNS di Cloudflare (penyedia lain memakai modul `caddy-dns/<nama>` yang sesuai). Buat folder terpisah, mis. `/opt/ccd-caddy`:
+
+```dockerfile
+# Dockerfile
+FROM caddy:builder AS builder
+RUN xcaddy build --with github.com/caddy-dns/cloudflare
+FROM caddy:2
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+```
+```yaml
+# docker-compose.yml
+services:
+  caddy:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - CF_API_TOKEN=${CF_API_TOKEN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+volumes:
+  caddy_data:
+```
+```
+# Caddyfile
+{
+    # Port 80 sudah dipakai container frontend dashboard; tanpa ini Caddy gagal start.
+    auto_https disable_redirects
+}
+dashboard.<domain> {
+    tls {
+        dns cloudflare {env.CF_API_TOKEN}
+    }
+    reverse_proxy 127.0.0.1:80 {
+        # nginx dashboard hanya mempercayai header ini dari proxy yang didaftarkan (lihat di bawah).
+        # Caddy menimpa nilai kiriman klien dengan alamat sebenarnya.
+        header_up CF-Connecting-IP {remote_host}
+    }
+}
+```
+Isi `CF_API_TOKEN` di berkas `.env` di folder yang sama (token Cloudflare dengan izin *Zone → DNS → Edit* hanya untuk zona itu), lalu `sudo docker compose up -d --build`. WebSocket (Connect, terminal, metrik) diteruskan Caddy tanpa pengaturan tambahan. Kalau VPS juga punya IP publik dan HTTP biasa di port 80 tidak boleh terbuka, batasi dengan firewall.
+
+**B: Cloudflare Tunnel.** Pasang `cloudflared` di VPS, buat tunnel di dashboard Cloudflare Zero Trust (*Networks → Tunnels*), lalu tambahkan *Public Hostname* `dashboard.<domain>` dengan layanan `http://localhost:80`. VPS cukup bisa keluar ke internet; tidak ada port yang perlu dibuka. Cloudflare yang mengurus HTTPS. Header `CF-Connecting-IP` diteruskan Cloudflare, jadi hanya alamat tempat `cloudflared` menyambung ke nginx yang perlu didaftarkan (lihat di bawah). **Bastion SSH tidak bisa lewat tunnel ini**; lihat catatan SSH di bawah.
+
+**IP asli pengguna di Activity Log.** Secara bawaan nginx dashboard hanya mempercayai header IP dari alamat Cloudflare. Di belakang Caddy atau `cloudflared` di VPS yang sama, yang dilihat nginx adalah alamat proxy itu, sehingga Activity Log, Sesi Web, dan Sesi Remote mencatat IP proxy, bukan IP pengguna. Daftarkan alamat proxy sebagai tepercaya:
+
+1. Lihat alamat yang dipakai proxy untuk menyambung: buka dashboard sekali, lalu `sudo docker logs --tail 5 ccd-frontend`. Kata pertama tiap baris adalah alamat itu. Untuk proxy di host yang sama biasanya gateway jaringan Docker, mis. `172.18.0.1`.
+2. Di `frontend/nginx.conf`, tambahkan satu baris tepat di bawah daftar `set_real_ip_from` Cloudflare: `set_real_ip_from 172.18.0.1;` (ganti dengan alamat dari langkah 1; tulis alamat tepatnya, jangan rentang lebar).
+3. `cd backend && sudo docker compose up -d --build frontend`.
+4. Periksa: coba login dengan password salah dari perangkat Anda, lalu lihat IP di **Audit & Remote → Activity Log**. Harus IP perangkat Anda, bukan IP proxy.
+
+Header ini tidak bisa dipalsukan oleh pengguna: nginx mengabaikannya dari sumber yang tidak terdaftar, dan Caddy menimpa nilai kiriman klien. Perubahan `nginx.conf` ikut berkas yang dilacak git; simpan sebagai commit lokal agar tidak bentrok saat `git pull`.
+
+**SSH (bastion) dengan domain.** Bastion memakai port 2222 dan TCP biasa, jadi tidak lewat Caddy atau Cloudflare Tunnel. Buat record `ssh.<domain>` yang **DNS only** (bukan di-proxy) ke alamat yang bisa dijangkau pengguna: IP privat untuk pengguna di LAN atau VPN, atau IP Tailscale untuk pengguna Tailscale. Isi `ssh.<domain>` di **Sistem → Alamat SSH untuk pengguna**. Dari internet, SSH ke VPS privat hanya bisa kalau port 2222 diteruskan (port forward) atau pengguna memakai VPN atau Tailscale.
+
+**Open Web dan Remote.** Server dashboard harus bisa menjangkau IP VM yang dibuka. Di VPS yang satu jaringan dengan VM ini otomatis terpenuhi; kalau VM berada di switch Bagian 5.6, ikuti langkah Tailscale di bagian itu.
+
+**Domain berganti atau dihapus.** Tidak ada domain yang tertanam di kode. Cukup ubah `ALLOWED_ORIGINS`, `Caddyfile` atau *Public Hostname* tunnel, dan alamat SSH di tab Sistem.
+
 ---
 
 ## 8. (Opsional) SSH dari Terminal Sendiri — Bastion
@@ -365,7 +548,7 @@ Fitur ini mati secara bawaan karena membuka satu port baru ke internet. Di `back
 ```bash
 COMPOSE_PROFILES=ssh
 BASTION_PUBLIC_PORT=2222        # port yang dibuka di VPS
-BASTION_PUBLIC_HOST=            # kosong = alamat yang dipakai membuka dashboard; isi domain kalau ada
+BASTION_PUBLIC_HOST=            # kosong = alamat yang dipakai membuka dashboard; bisa juga diatur di tab Sistem
 ```
 `BASTION_TOKEN` diisi otomatis oleh `./setup.sh`, juga untuk `.env` lama. Lalu:
 ```bash
@@ -375,7 +558,7 @@ cd backend && sudo docker compose logs bastion | grep SHA256    # fingerprint ho
 ```
 Pastikan port 2222 tidak diblokir firewall VPS. Untuk mematikan lagi: kosongkan `COMPOSE_PROFILES`, lalu `sudo docker compose stop bastion`. Fingerprint juga tampil di tombol **SSH** pada kartu VM.
 
-**Memakai domain.** Buat record DNS khusus untuk bastion, mis. `ssh.<domain>` → IP VPS, lalu isi `BASTION_PUBLIC_HOST=ssh.<domain>` dan jalankan `cd backend && sudo docker compose up -d backend`. Kalau domain dikelola Cloudflare, record bastion harus **DNS only** (awan abu-abu). Proxy Cloudflare hanya meneruskan HTTP/HTTPS, jadi SSH ke port 2222 lewat record yang di-proxy akan gagal. Record untuk dashboard boleh di-proxy, tetapi dashboard hanya melayani HTTP di port 80. Dengan mode SSL *Flexible*, jalur dari Cloudflare ke server tidak terenkripsi, jadi pakai hanya kalau risiko itu bisa diterima. Tambahkan juga alamat dashboard yang baru ke `ALLOWED_ORIGINS`.
+**Memakai domain.** Buat record DNS khusus untuk bastion, mis. `ssh.<domain>` → IP VPS, lalu isi **Alamat SSH untuk pengguna** di tab **Sistem** dengan `ssh.<domain>`. Cara lama juga masih bisa: isi `BASTION_PUBLIC_HOST=ssh.<domain>` di `.env` lalu jalankan `cd backend && sudo docker compose up -d backend`. Nilai di tab Sistem lebih diutamakan daripada `.env`. Kalau keduanya kosong, dipakai alamat yang sedang dibuka pengguna di browser. Saat domain berganti atau tidak memakai domain lagi, cukup ganti atau kosongkan alamat itu di tab Sistem. Kalau domain dikelola Cloudflare, record bastion harus **DNS only** (awan abu-abu). Proxy Cloudflare hanya meneruskan HTTP/HTTPS, jadi SSH ke port 2222 lewat record yang di-proxy akan gagal. Record untuk dashboard boleh di-proxy, tetapi dashboard hanya melayani HTTP di port 80. Dengan mode SSL *Flexible*, jalur dari Cloudflare ke server tidak terenkripsi, jadi pakai hanya kalau risiko itu bisa diterima. Tambahkan juga alamat dashboard yang baru ke `ALLOWED_ORIGINS`. Di belakang proxy Cloudflare, nginx membaca IP asli pengunjung dari header `CF-Connecting-IP`, hanya untuk permintaan yang datang dari alamat Cloudflare, jadi Activity Log, Web Sessions, dan Remote Sessions tetap mencatat IP pengguna. Daftar alamat Cloudflare ada di `frontend/nginx.conf`; perbarui dari https://www.cloudflare.com/ips/ kalau berubah.
 
 Setelah alamat bastion pindah dari IP ke domain, pengguna yang pernah terhubung akan ditanya konfirmasi host key sekali lagi. Fingerprint-nya tetap sama, karena host key disimpan di volume `bastion_keys`.
 
@@ -398,7 +581,7 @@ Panduan lengkap per OS (Linux, macOS, Windows), termasuk `scp`, VS Code, dan pen
 Kalau muncul `administratively prohibited`, VM itu tidak termasuk VM Anda. Kalau ditolak di bastion (`Permission denied (publickey)`), periksa apakah key sudah didaftarkan dan akun Anda aktif.
 
 ### 8.4 Audit
-Bastion meneruskan log `sshd` ke dashboard, jadi setiap koneksi tercatat di **Audit & Remote → SSH Sessions**: user, key, IP asal, VM tujuan, waktu mulai dan selesai, serta jumlah data. Di **Activity Log** muncul:
+Bastion meneruskan log `sshd` ke dashboard, jadi setiap koneksi tercatat di **Audit & Remote → Sesi SSH**: user, key, IP asal, VM tujuan, waktu mulai dan selesai, serta jumlah data. Di **Activity Log** muncul:
 
 | Kejadian | Artinya |
 |---|---|
@@ -408,7 +591,7 @@ Bastion meneruskan log `sshd` ke dashboard, jadi setiap koneksi tercatat di **Au
 
 Isi sesi tidak direkam. Bastion memang tidak bisa melihatnya, karena koneksi terenkripsi langsung antara laptop dan VM. Percobaan dengan key yang tidak terdaftar di dashboard (biasanya pemindaian dari internet) hanya ada di `sudo docker compose logs bastion`.
 
-Sesi yang sedang berjalan tidak ikut terputus saat key dihapus atau akun dinonaktifkan. Yang ditolak adalah login berikutnya. Kalau sesi yang sedang berjalan harus diputus, `sudo docker compose restart bastion` memutus semua sesi SSH lewat bastion.
+Menghapus key atau menonaktifkan akun dari halaman Users hanya menolak login berikutnya. Untuk memutus sesi yang sedang berjalan, pakai **Audit & Remote → Sesi SSH → ⛔ Putuskan Sesi** (bisa sekaligus menonaktifkan akunnya). Perintahnya dijalankan skrip `ccd-kill` di container bastion; kalau bastion belum diperbarui ke versi ini, dashboard menampilkan pesan agar container bastion dibangun ulang (`sudo docker compose --profile ssh up -d --build bastion`). Pemutusan tercatat sebagai `SSH_KILL`. `sudo docker compose restart bastion` tetap bisa dipakai untuk memutus semua sesi SSH sekaligus.
 
 ---
 
