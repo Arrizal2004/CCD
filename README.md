@@ -1,5 +1,7 @@
 # Campus Cloud Dashboard (CCD)
 
+**Student Lab Portal**: portal lab praktikum self-hosted untuk Proxmox VE, dengan akses VM lewat browser.
+
 Dashboard self-hosted untuk memberi mahasiswa akses ke VM lab praktikum lewat browser. Mahasiswa tidak perlu VPN, dan port SSH/RDP tidak perlu dibuka ke internet. CCD berjalan di atas Proxmox VE yang sudah ada.
 
 Mahasiswa login, melihat VM yang ditugaskan kepadanya, lalu klik **Connect**. Sesi SSH atau RDP terbuka di tab browser lewat Apache Guacamole. Admin mengatur siapa boleh mengakses VM mana, membuat VM dari template, dan memantau sesi dari dashboard yang sama.

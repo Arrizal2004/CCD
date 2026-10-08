@@ -7,7 +7,7 @@ import { setDefaultTheme } from './theme';
 // jendela Tentang, dan judul tab. Nilai terakhir disimpan di browser supaya nama tidak berkedip dari
 // nama bawaan ke nama kampus setiap kali halaman dibuka.
 export const DEFAULT_BRANDING = {
-    name: 'Campus Cloud Dashboard', short_name: 'CCD', institution: '', tagline: 'Clientless Campus Cloud',
+    name: 'Campus Cloud Dashboard', short_name: 'CCD', institution: '', tagline: 'Student Lab Portal',
     registration_open: true, email_required: false, email_domains: [],
     accent_color: '', default_language: 'id', default_theme: 'dark', logo_version: null, announcement: null,
 };

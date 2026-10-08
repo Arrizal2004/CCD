@@ -18,7 +18,7 @@ DEFAULTS = {
     "name": "Campus Cloud Dashboard",
     "short_name": "CCD",
     "institution": "",
-    "tagline": "Clientless Campus Cloud",
+    "tagline": "Student Lab Portal",
     "registration_open": True,
     "allowed_emails": [],      # "@domain" (termasuk subdomain) atau alamat lengkap; kosong = semua email
     "accent_color": "",        # "#rrggbb"; kosong = warna bawaan
