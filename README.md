@@ -60,7 +60,7 @@ cd campus-cloud-dashboard
 
 Setelah selesai, buka `http://<ip-server>` dan login sebagai `admin` dengan password yang dicetak di akhir proses. Password admin Guacamole juga dicetak sekali. Simpan keduanya. Nama sistem dan aturan pendaftaran bisa diubah di tab **Sistem**.
 
-Langkah berikutnya ada di [`docs/PANDUAN_DEPLOYMENT.md`](docs/PANDUAN_DEPLOYMENT.md):
+Langkah berikutnya ada di [`docs/PANDUAN_DEPLOYMENT.md`](docs/PANDUAN_DEPLOYMENT.md) (Bagian 1 sampai 3 juga tersedia dalam bahasa Inggris di [`docs/DEPLOYMENT.en.md`](docs/DEPLOYMENT.en.md)):
 - Menghubungkan VPS ke Proxmox lewat Tailscale (Bagian 1.6).
 - Membuat pool, API token, dan izin di Proxmox (Bagian 2).
 - Mendaftarkan Proxmox ke dashboard (Bagian 3).
@@ -74,7 +74,7 @@ Langkah berikutnya ada di [`docs/PANDUAN_DEPLOYMENT.md`](docs/PANDUAN_DEPLOYMENT
 ```
 backend/     FastAPI: routers/, services/, migrations/, tests/, scripts/ (backup), bastion/ (SSH), docker-compose.yml
 frontend/    React + Vite: src/pages/, src/components/, nginx.conf
-docs/        Panduan deployment, pembuatan template VM, dan SSH untuk mahasiswa
+docs/        Panduan deployment (Bagian 1 sampai 3 juga dalam bahasa Inggris), pembuatan template VM, dan SSH untuk mahasiswa
 setup.sh     Instalasi satu perintah
 SECURITY.md  Cara melaporkan celah keamanan
 CONTRIBUTING.md  Panduan berkontribusi
@@ -112,7 +112,7 @@ CI di `.github/workflows/ci.yml` menjalankan test backend, lint, test, dan build
 
 Dashboard tidak menyediakan HTTPS sendiri. Untuk akses dari luar jaringan, pakai `tailscale serve` atau `tailscale funnel` (Bagian 7 panduan deployment), atau reverse proxy dengan sertifikat TLS.
 
-Cara melaporkan celah keamanan ada di [SECURITY.md](SECURITY.md); jangan lewat issue publik.
+Cara melaporkan celah keamanan ada di [SECURITY.md](SECURITY.md) (bahasa Inggris dan Indonesia); jangan lewat issue publik.
 
 ## Batasan yang diketahui
 
@@ -131,7 +131,7 @@ Prototype yang sudah berjalan di lab praktikum. Proyek ini berawal sebagai proye
 
 ## Berkontribusi
 
-Panduan kontribusi ada di [CONTRIBUTING.md](CONTRIBUTING.md).
+Panduan kontribusi ada di [CONTRIBUTING.md](CONTRIBUTING.md), dalam bahasa Inggris dan Indonesia.
 
 ## Lisensi
 

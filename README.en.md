@@ -8,7 +8,7 @@ CCD lets students reach lab VMs from a browser. Students do not need a VPN, and 
 
 A student signs in, sees the VMs assigned to them, and clicks **Connect**. An SSH or RDP session opens in a browser tab through Apache Guacamole. Admins decide who can access which VM, create VMs from templates, and monitor sessions from the same dashboard.
 
-> The deployment guides in [`docs/`](docs/) are currently written in Indonesian. The dashboard itself, including server error messages and the audit log, works in both Indonesian and English.
+> The deployment guide is available in English for the first three sections (install, prepare Proxmox, register Proxmox): [`docs/DEPLOYMENT.en.md`](docs/DEPLOYMENT.en.md). The rest of the guides in [`docs/`](docs/) are in Indonesian for now. The dashboard itself, including server error messages and the audit log, works in both Indonesian and English.
 
 ## Features
 
@@ -62,11 +62,11 @@ cd campus-cloud-dashboard
 
 When it finishes, open `http://<server-ip>` and sign in as `admin` with the password printed at the end. The Guacamole admin password is printed once as well. Keep both. The system name and the sign-up rules can be changed in the **System** tab.
 
-The next steps are in [`docs/PANDUAN_DEPLOYMENT.md`](docs/PANDUAN_DEPLOYMENT.md) (Indonesian):
-- Connecting the VPS to Proxmox through Tailscale (section 1.6).
-- Creating the pool, API token and permissions in Proxmox (section 2).
-- Registering Proxmox in the dashboard (section 3).
-- Building VM templates (section 4, details in [`docs/PANDUAN_TEMPLATE_VM.md`](docs/PANDUAN_TEMPLATE_VM.md)).
+The next steps are in the deployment guide. Sections 1 to 3 are in English in [`docs/DEPLOYMENT.en.md`](docs/DEPLOYMENT.en.md); the rest is in Indonesian in [`docs/PANDUAN_DEPLOYMENT.md`](docs/PANDUAN_DEPLOYMENT.md):
+- Connecting the VPS to Proxmox through Tailscale (section 1.6, English).
+- Creating the pool, API token and permissions in Proxmox (section 2, English).
+- Registering Proxmox in the dashboard (section 3, English).
+- Building VM templates (section 4, Indonesian; details in [`docs/PANDUAN_TEMPLATE_VM.md`](docs/PANDUAN_TEMPLATE_VM.md)).
 - Access from outside the network, or a private VPS with your own domain (sections 7 and 7.1).
 - Enabling SSH through the bastion (section 8). The guide for students is [`docs/PANDUAN_SSH.md`](docs/PANDUAN_SSH.md).
 - Database backups and copying them off the server (section 9).
@@ -76,7 +76,7 @@ The next steps are in [`docs/PANDUAN_DEPLOYMENT.md`](docs/PANDUAN_DEPLOYMENT.md)
 ```
 backend/     FastAPI: routers/, services/, migrations/, tests/, scripts/ (backup), bastion/ (SSH), docker-compose.yml
 frontend/    React + Vite: src/pages/, src/components/, nginx.conf
-docs/        Deployment guide, VM template guide, and the SSH guide for students (Indonesian)
+docs/        Deployment guide (English for sections 1 to 3, full guide in Indonesian), VM template guide, and the SSH guide for students (Indonesian)
 setup.sh     One-command installation
 SECURITY.md  How to report a security issue
 CONTRIBUTING.md  How to contribute
@@ -114,7 +114,7 @@ CI in `.github/workflows/ci.yml` runs the backend tests, lint, tests and the fro
 
 The dashboard does not provide HTTPS itself. For access from outside the network, use `tailscale serve` or `tailscale funnel` (section 7 of the deployment guide), or a reverse proxy with a TLS certificate.
 
-How to report a security issue is described in [SECURITY.md](SECURITY.md); please do not use public issues for that.
+How to report a security issue is described in [SECURITY.md](SECURITY.md) (English and Indonesian); please do not use public issues for that.
 
 ## Known limitations
 
@@ -133,7 +133,7 @@ A prototype that is already running in a practical lab. The project started as a
 
 ## Contributing
 
-The contribution guide is in [CONTRIBUTING.md](CONTRIBUTING.md) (Indonesian).
+The contribution guide is in [CONTRIBUTING.md](CONTRIBUTING.md), in English and Indonesian.
 
 ## License
 
