@@ -115,13 +115,20 @@ async def query_logs(
     limit: int = 50, offset: int = 0,
     search: str = "", severity: str = "",
     start: Optional[str] = None, end: Optional[str] = None,
-    action: str = "", username: str = "",
+    action: str = "", username: str = "", hide_instances=None,
 ) -> dict:
     """Ambil audit logs dengan pagination + filter. Return {total, items}.
-    action: satu action_type persis; username: satu akun persis (tanpa beda huruf besar/kecil)."""
+    action: satu action_type persis; username: satu akun persis (tanpa beda huruf besar/kecil).
+    hide_instances: label Proxmox yang catatannya disembunyikan (sysadmin yang tidak memegangnya);
+    catatan tanpa nama Proxmox, mis. soal akun, tetap tampil."""
     where = []
     params = []
     i = 1
+    if hide_instances:
+        esc = [l.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") for l in hide_instances]
+        params.append(list(hide_instances)); params.append([p for l in esc for p in (f"{l}/%", f"{l}\\_\\_%")])
+        where.append(f"NOT (COALESCE(target_server_name, '') = ANY(${i}) OR COALESCE(target_server_name, '') LIKE ANY(${i + 1}))")
+        i += 2
     if search:
         where.append(f"(username ILIKE ${i} OR action_type ILIKE ${i} OR detail_message ILIKE ${i} "
                      f"OR detail_en ILIKE ${i} OR target_server_name ILIKE ${i})")

@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from auth import require_sysadmin, get_current_user
 from database import get_pool, get_student_vm_access
-from services import guest_accounts
+from services import guest_accounts, scope
 from i18n import tr
 from services.audit import both, log_activity
 
@@ -211,7 +211,7 @@ async def remove_member(group_id: int, user_id: int, request: Request, actor: di
 # ── VM Access ────────────────────────────────────────────────────────────────
 
 @router.get("/{group_id}/vms")
-async def list_group_vms(group_id: int, _: dict = Depends(require_sysadmin)):
+async def list_group_vms(group_id: int, user: dict = Depends(require_sysadmin)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await _get_group_or_404(conn, group_id)
@@ -224,7 +224,8 @@ async def list_group_vms(group_id: int, _: dict = Depends(require_sysadmin)):
             WHERE group_id = $1
             ORDER BY host_name, vm_id
         """, group_id)
-    return [dict(r) for r in rows]
+    allowed = await scope.allowed_labels(user)
+    return [dict(r) for r in rows if allowed is None or scope.host_label(r["host_name"]) in allowed]
 
 
 def _validate_vm_access_body(body: VmAccessBody, password_required: bool = True):
@@ -294,6 +295,7 @@ async def _revoke_connect_for_members(group_id: int, vm_id: str, host_name: str)
 
 @router.post("/{group_id}/vms", status_code=201)
 async def add_group_vm(group_id: int, body: VmAccessBody, request: Request, user: dict = Depends(require_sysadmin)):
+    await scope.require_host(user, body.host_name)
     _validate_vm_access_body(body)
     password_enc = None
     if body.auth_mode == "credentials" and body.os_password:
@@ -337,6 +339,7 @@ async def update_group_vm_access(group_id: int, body: VmAccessBody, request: Req
                                  user: dict = Depends(require_sysadmin)):
     """Update auth_mode dan credentials untuk VM yang sudah di-assign ke grup. Password kosong berarti
     password tersimpan tidak diubah (boleh selama username-nya sama dan password sudah pernah diisi)."""
+    await scope.require_host(user, body.host_name)
     _validate_vm_access_body(body, password_required=False)
     password_enc = None
     if body.auth_mode == "credentials" and body.os_password:
@@ -387,6 +390,7 @@ async def update_group_vm_access(group_id: int, body: VmAccessBody, request: Req
 
 @router.delete("/{group_id}/vms", status_code=204)
 async def remove_group_vm(group_id: int, body: VmAccessBody, request: Request, user: dict = Depends(require_sysadmin)):
+    await scope.require_host(user, body.host_name)
     pool = await get_pool()
     async with pool.acquire() as conn:
         group = await _get_group_or_404(conn, group_id)

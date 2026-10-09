@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from auth import Role, get_current_user
 from database import get_pool
-from services import networks as nw
+from services import networks as nw, scope
 from services.audit import both, log_activity
 from services.proxmox_client import ProxmoxError
 from i18n import tr
@@ -69,6 +69,9 @@ async def list_networks(user: dict = Depends(get_current_user)):
     async with db.acquire() as conn:
         insts = await conn.fetch("SELECT label, token_id, net_pools, sdn_zone FROM proxmox_instances ORDER BY label")
         rows = await conn.fetch("SELECT * FROM networks ORDER BY instance, id")
+    allowed = await scope.allowed_labels(user)
+    if allowed is not None:
+        insts = [i for i in insts if i["label"] in allowed]
     out = []
     for inst in insts:
         nets = [_view(dict(r)) for r in rows if r["instance"] == inst["label"]]
@@ -87,6 +90,7 @@ async def list_networks(user: dict = Depends(get_current_user)):
 @router.get("/instances/{label}/check")
 async def check_instance(label: str, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, label)
     inst = await nw.get_instance(label)
     result = await nw.readiness(await nw.client_for(label), inst)
     nets = await nw.instance_networks(label)
@@ -98,6 +102,7 @@ async def check_instance(label: str, user: dict = Depends(get_current_user)):
 @router.post("/instances/{label}/pools")
 async def add_pool(label: str, body: PoolBody, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, label)
     res = await nw.add_pool(label, body.cidr)
     def _detail():
         replaced = (tr(f" (menggantikan {', '.join(res['replaced'])})", f" (replacing {', '.join(res['replaced'])})")
@@ -111,6 +116,7 @@ async def add_pool(label: str, body: PoolBody, request: Request, user: dict = De
 @router.delete("/instances/{label}/pools")
 async def remove_pool(label: str, cidr: str, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, label)
     res = await nw.remove_pool(label, cidr)
     await log_activity(user, "NETWORK_POOL_REMOVE", "WARNING", {"id": label, "name": label},
                        both(lambda: tr(f"{user.get('username')} menghapus blok alamat switch {res['removed']} dari Proxmox {label}",
@@ -121,6 +127,7 @@ async def remove_pool(label: str, cidr: str, request: Request, user: dict = Depe
 @router.post("")
 async def create_network(body: NetworkCreate, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, body.instance)
     net = await nw.create(body.instance, body.name, body.cidr, body.snat, user.get("username"), body.add_pool)
     await log_activity(user, "NETWORK_CREATE", "WARNING", {"id": net["vnet"], "name": body.instance},
                        both(lambda: tr(f"{user.get('username')} membuat switch '{net['name']}' {net['cidr']} di {body.instance} "
@@ -136,6 +143,7 @@ async def create_network(body: NetworkCreate, request: Request, user: dict = Dep
 async def update_network(network_id: int, body: NetworkUpdate, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
     before = await nw.get_network(network_id)
+    await scope.require_instance(user, before["instance"])
     net = await nw.update(network_id, body.name, body.snat)
     changes = []
     if net["name"] != before["name"]:
@@ -153,6 +161,7 @@ async def update_network(network_id: int, body: NetworkUpdate, request: Request,
 @router.delete("/{network_id}")
 async def delete_network(network_id: int, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, (await nw.get_network(network_id))["instance"])
     net = await nw.delete(network_id)
     await log_activity(user, "NETWORK_DELETE", "WARNING", {"id": net["vnet"], "name": net["instance"]},
                        both(lambda: tr(f"{user.get('username')} menghapus switch '{net['name']}' {net['cidr']} di {net['instance']}",
@@ -164,6 +173,7 @@ async def delete_network(network_id: int, request: Request, user: dict = Depends
 async def network_vms(network_id: int, user: dict = Depends(get_current_user)):
     _require_admin(user)
     net = await nw.get_network(network_id)
+    await scope.require_instance(user, net["instance"])
     try:
         return await nw.attached_vms(await nw.client_for(net["instance"]), net["vnet"])
     except ProxmoxError as e:
@@ -174,6 +184,7 @@ async def network_vms(network_id: int, user: dict = Depends(get_current_user)):
 async def network_free_ip(network_id: int, user: dict = Depends(get_current_user)):
     _require_admin(user)
     net = await nw.get_network(network_id)
+    await scope.require_instance(user, net["instance"])
     try:
         settings = await nw.vm_settings(net["instance"], network_id, None, None)
     except ProxmoxError as e:

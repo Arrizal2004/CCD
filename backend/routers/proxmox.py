@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 
 from auth import get_current_user, Role
 from database import get_pool, get_student_vm_access
-from services import vm_access
+from services import vm_access, scope
 from services import proxmox_instances as pve_instances
 from services.proxmox_client import ProxmoxError
 from services.audit import both, log_activity
@@ -54,7 +54,7 @@ from services import networks
 from services import proxmox_iops_poller as iops_poller
 from i18n import tr
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(scope.enforce_path)])
 log = logging.getLogger("proxmox")
 
 _ADMIN_ROLES = (Role.SUPERADMIN, Role.SYSADMIN)
@@ -140,6 +140,13 @@ async def _sync_vms_table(host_key: str, vms: list[dict]):
                        VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (vm_id, host_name) DO NOTHING""", *args)
 
 
+async def _my_instances(user: dict) -> list[dict]:
+    """Instance Proxmox yang boleh dilihat user ini: semuanya untuk superadmin, yang ditugaskan untuk sysadmin."""
+    allowed = await scope.allowed_labels(user)
+    items = await pve_instances.list_instances()
+    return items if allowed is None else [i for i in items if i["label"] in allowed]
+
+
 @router.get("/all-vms")
 async def get_all_vms(user: dict = Depends(get_current_user)):
     """Flat list semua VM lintas semua instance/node Proxmox yang terkonfigurasi —
@@ -149,7 +156,7 @@ async def get_all_vms(user: dict = Depends(get_current_user)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         ccd_ids = {(r["vm_id"], r["host_name"]): r["ccd_id"] for r in await conn.fetch("SELECT vm_id, host_name, ccd_id FROM vms")}
-    for inst in await pve_instances.list_instances():
+    for inst in await _my_instances(user):
         label = inst["label"]
         try:
             client = await pve_instances.get_client(label)
@@ -217,7 +224,7 @@ async def get_host_status(user: dict = Depends(get_current_user)):
     bisa kontrol VM/node. Hanya admin — student tidak boleh melihat performa/nama host."""
     _require_admin(user)
     result = []
-    for inst in await pve_instances.list_instances():
+    for inst in await _my_instances(user):
         label = inst["label"]
         try:
             client = await pve_instances.get_client(label)
@@ -240,7 +247,7 @@ async def get_host_status(user: dict = Depends(get_current_user)):
 async def get_instances(user: dict = Depends(get_current_user)):
     # Berisi alamat host Proxmox — hanya admin. Student memakai GET /my-vms (tanpa nama host).
     _require_admin(user)
-    return await pve_instances.list_instances()
+    return await _my_instances(user)
 
 
 @router.post("/instances")
@@ -256,6 +263,9 @@ async def post_instance(body: InstanceCreateRequest, request: Request, user: dic
     created = await pve_instances.create_instance(
         body.label, body.host, body.token_id, body.token_secret, body.verify_ssl
     )
+    if scope.is_scoped(user):
+        # Sysadmin yang menambah instance langsung bisa mengelolanya; tanpa ini instance itu tidak terlihat olehnya.
+        await scope.add_instance(int(user["sub"]), body.label, user.get("username") or "")
     await log_activity(user, "PVE_INSTANCE_ADD", "WARNING", {"id": body.label, "name": body.label},
                        both(lambda: tr(f"{user.get('username')} menambahkan instance Proxmox '{body.label}' ({body.host}, "
                                        f"token {body.token_id}, verifikasi SSL {'aktif' if body.verify_ssl else 'mati'})",

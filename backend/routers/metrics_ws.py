@@ -58,6 +58,10 @@ async def metrics_live(
         if vm_id and vm_id not in allowed_vms:
             await websocket.close(code=1008)  # policy violation
             return
+    scoped = None                         # sysadmin: hanya metrik VM di Proxmox yang ditugaskan kepadanya
+    if user.get("role") == Role.SYSADMIN:
+        from services import scope
+        scoped = await scope.allowed_labels(user)
     r = websocket.app.state.redis
     pubsub = r.pubsub()
     await pubsub.subscribe(LIVE_CHANNEL)
@@ -75,6 +79,8 @@ async def metrics_live(
                 continue
             # RBAC: student tidak boleh menerima metrik VM yang bukan miliknya
             if allowed_vms is not None and obj.get("vm_id") not in allowed_vms:
+                continue
+            if scoped is not None and (obj.get("host_name") or "").partition("__")[0] not in scoped:
                 continue
             # Filter opsional per host / per VM
             if host and obj.get("host_name") != host:

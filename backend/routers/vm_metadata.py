@@ -8,8 +8,9 @@ from schemas import VmMetadataResponse
 from auth import get_current_user, Role
 from services.ssh_client import encrypt_secret, decrypt_secret
 from i18n import tr
+from services import scope
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(scope.enforce_path)])
 log = logging.getLogger("vm_metadata")
 
 _ADMIN_ROLES = (Role.SUPERADMIN, Role.SYSADMIN)

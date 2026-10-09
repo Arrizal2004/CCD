@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from auth import get_current_user, require_superadmin, require_sysadmin, verify_token, Role
 from database import get_pool
 from i18n import tr
+from services import scope
 
 log = logging.getLogger(__name__)
 
@@ -174,6 +175,8 @@ async def _get_request_or_403(conn, req_id: str, user: dict) -> dict:
     is_admin = user["role"] in _INFRA_ADMIN_ROLES
     if not is_admin and r["student_id"] != int(user["sub"]):
         raise HTTPException(403, tr("Akses ditolak", "Access denied"))
+    if r.get("linked_host_name") and not await scope.host_allowed(user, r["linked_host_name"]):
+        raise HTTPException(403, tr("Akses ditolak", "Access denied"))
     return r
 
 
@@ -230,6 +233,11 @@ async def list_requests(
 
     if not is_admin:
         conditions.append(f"ir.student_id = ${idx}"); params.append(int(user["sub"])); idx += 1
+    allowed = await scope.allowed_labels(user)
+    if allowed is not None:
+        # Sysadmin: request yang belum ditautkan ke VM, dan yang VM-nya ada di Proxmox yang ditugaskan kepadanya.
+        conditions.append(f"(ir.linked_host_name IS NULL OR split_part(ir.linked_host_name, '__', 1) = ANY(${idx}))")
+        params.append(list(allowed)); idx += 1
     if status:
         conditions.append(f"ir.status = ${idx}"); params.append(status.upper()); idx += 1
     if request_type:
@@ -469,12 +477,15 @@ async def infra_ws(websocket: WebSocket, req_id: str, token: str = Query(...)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         req = await conn.fetchrow(
-            "SELECT student_id, status FROM infrastructure_requests WHERE id = $1", req_id
+            "SELECT student_id, status, linked_host_name FROM infrastructure_requests WHERE id = $1", req_id
         )
     if not req:
         await websocket.close(code=4404)
         return
     if user["role"] not in _INFRA_ADMIN_ROLES and req["student_id"] != int(user["sub"]):
+        await websocket.close(code=1008)
+        return
+    if req["linked_host_name"] and not await scope.host_allowed(user, req["linked_host_name"]):
         await websocket.close(code=1008)
         return
 
@@ -579,6 +590,8 @@ async def review_request(
         raise HTTPException(400, tr(f"status harus salah satu dari: {', '.join(VALID_STATUSES)}",
                                     f"status must be one of: {', '.join(VALID_STATUSES)}"))
 
+    if body.linked_host_name:
+        await scope.require_host(user, body.linked_host_name)
     pool = await get_pool()
     async with pool.acquire() as conn:
         req = await _get_request_or_403(conn, req_id, user)

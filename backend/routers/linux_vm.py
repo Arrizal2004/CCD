@@ -20,8 +20,9 @@ from typing import Optional
 from auth import get_current_user, Role
 from routers.ssh_creds import get_vm_ssh_client
 from i18n import tr
+from services import scope
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(scope.enforce_path)])
 
 
 def _require_admin(user: dict):

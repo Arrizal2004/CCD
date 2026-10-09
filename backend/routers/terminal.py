@@ -62,6 +62,11 @@ async def terminal_linux(
         if (vm_id_clean, host_name) not in allowed:
             await websocket.close(code=4403)
             return
+    elif user.get("role") == "sysadmin":
+        from services import scope
+        if not await scope.host_allowed(user, host_name):
+            await websocket.close(code=4403)
+            return
 
     await websocket.accept()
 
@@ -214,6 +219,11 @@ async def terminal_windows(
             return
         allowed = await get_student_vm_ids(int(user["sub"]), host_name, full_only=True)
         if (vm_id_clean, host_name) not in allowed:
+            await websocket.close(code=4403)
+            return
+    elif user.get("role") == "sysadmin":
+        from services import scope
+        if not await scope.host_allowed(user, host_name):
             await websocket.close(code=4403)
             return
 

@@ -18,7 +18,7 @@ from auth import require_sysadmin, Role
 from database import get_pool
 from services.audit import query_logs, log_activity, action_types, failed_logins, both
 from services.csv_export import csv_response, fmt_time, MAX_ROWS
-from services import account_block, remote_history
+from services import account_block, remote_history, scope
 from services import system_settings as ss
 from i18n import tr
 
@@ -48,6 +48,7 @@ async def get_audit_logs(
 ):
     try:
         return await query_logs(limit=page_size, offset=(page - 1) * page_size,
+                                hide_instances=await scope.hidden_labels(user),
                                 **_audit_filters(search, severity, start, end, action, username))
     except Exception as e:
         log.warning("audit query gagal: %s", e)
@@ -75,7 +76,7 @@ async def export_audit_logs(
     tz = ss.tzinfo(await ss.get_settings())
     tzn = tz.key
     filters = _audit_filters(search, severity, start, end, action, username)
-    data = await query_logs(limit=MAX_ROWS, offset=0, **filters)
+    data = await query_logs(limit=MAX_ROWS, offset=0, hide_instances=await scope.hidden_labels(user), **filters)
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
                        both(lambda: tr(f"{user.get('username')} mengekspor {len(data['items'])} baris Activity Log ke CSV",
                        f"{user.get('username')} exported {len(data['items'])} activity log rows to CSV")), request)
@@ -98,7 +99,9 @@ async def remote_sessions(user: dict = Depends(require_sysadmin)):
     """Sesi remote aktif saat ini."""
     try:
         from services.guac_sync import get_active_sessions
-        return {"sessions": await get_active_sessions()}
+        allowed = await scope.allowed_labels(user)
+        return {"sessions": [s for s in await get_active_sessions()
+                             if allowed is None or scope.host_label(s["host"]) in allowed]}
     except Exception as e:
         log.warning("active sessions gagal: %s", e)
         return {"sessions": []}
@@ -161,6 +164,7 @@ async def kill_remote_session(body: KillReq, request: Request, user: dict = Depe
         raise HTTPException(404, tr("Sesi tidak ditemukan atau sudah berakhir",
                                     "Session not found or already ended"))
     who, vm, host = sess["username"], sess["vm"], sess["host"]
+    await scope.require_host(user, host)
 
     # Pemeriksaan pemblokiran dilakukan sebelum sesi diputus, supaya pilihan yang tidak bisa dijalankan
     # tidak meninggalkan sesi yang terputus tanpa blokir.
@@ -236,7 +240,8 @@ async def remote_history_list(
 ):
     """Riwayat sesi Remote, terbaru dulu. search: sebagian username/nama VM; username: satu akun."""
     try:
-        return await remote_history.history(page_size, (page - 1) * page_size, search.strip(), username.strip())
+        return await remote_history.history(page_size, (page - 1) * page_size, search.strip(), username.strip(),
+                                            labels=await scope.allowed_labels(user))
     except Exception as e:
         log.warning("remote history gagal: %s", e)
         return {"total": 0, "items": []}
@@ -251,7 +256,7 @@ async def export_remote_history(
 ):
     tz = ss.tzinfo(await ss.get_settings())
     tzn = tz.key
-    data = await remote_history.history(MAX_ROWS, 0, search.strip(), username.strip())
+    data = await remote_history.history(MAX_ROWS, 0, search.strip(), username.strip(), labels=await scope.allowed_labels(user))
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
                        both(lambda: tr(f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat Remote ke CSV",
                        f"{user.get('username')} exported {len(data['items'])} Remote history rows to CSV")), request)
@@ -269,7 +274,7 @@ async def export_remote_history(
 async def openweb_active(user: dict = Depends(require_sysadmin)):
     """Sesi Open Web yang masih berlaku (belum dicabut, belum kedaluwarsa)."""
     from routers.openweb import list_sessions
-    return {"sessions": (await list_sessions(active_only=True, limit=200))["items"]}
+    return {"sessions": (await list_sessions(active_only=True, limit=200, ips=await scope.scope_ips(user)))["items"]}
 
 
 @router.get("/openweb/history")
@@ -281,7 +286,7 @@ async def openweb_history(
 ):
     from routers.openweb import list_sessions
     return await list_sessions(active_only=False, limit=page_size, offset=(page - 1) * page_size,
-                               username=username.strip())
+                               username=username.strip(), ips=await scope.scope_ips(user))
 
 
 @router.get("/openweb/history/export")
@@ -290,7 +295,8 @@ async def export_openweb_history(request: Request, username: str = Query("", max
     tz = ss.tzinfo(await ss.get_settings())
     tzn = tz.key
     from routers.openweb import list_sessions
-    data = await list_sessions(active_only=False, limit=MAX_ROWS, offset=0, username=username.strip())
+    data = await list_sessions(active_only=False, limit=MAX_ROWS, offset=0, username=username.strip(),
+                               ips=await scope.scope_ips(user))
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
                        both(lambda: tr(f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat Open Web ke CSV",
                        f"{user.get('username')} exported {len(data['items'])} Open Web history rows to CSV")), request)
@@ -313,6 +319,13 @@ async def openweb_kill(body: OpenWebKillReq, request: Request, user: dict = Depe
     """Cabut sesi Open Web: link/tiketnya langsung berhenti bekerja."""
     from routers.openweb import revoke_session
     target = None
+    if scope.is_scoped(user):
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            ip = await conn.fetchval("SELECT target_ip FROM openweb_sessions WHERE id = $1", body.session_id)
+        if ip is not None and ip not in set(await scope.scope_ips(user) or []):
+            raise HTTPException(403, tr("Anda tidak ditugaskan untuk mengelola Proxmox ini",
+                                        "You are not assigned to manage this Proxmox"))
     if body.block == "account":
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -346,7 +359,7 @@ async def openweb_kill(body: OpenWebKillReq, request: Request, user: dict = Depe
 async def ssh_active(user: dict = Depends(require_sysadmin)):
     """Sesi SSH lewat bastion yang masih tersambung."""
     from services.ssh_audit import list_sessions
-    return {"sessions": (await list_sessions(active_only=True, limit=200))["items"]}
+    return {"sessions": (await list_sessions(active_only=True, limit=200, ips=await scope.scope_ips(user)))["items"]}
 
 
 @router.get("/ssh/history")
@@ -358,7 +371,7 @@ async def ssh_history(
 ):
     from services.ssh_audit import list_sessions
     return await list_sessions(active_only=False, limit=page_size, offset=(page - 1) * page_size,
-                               username=username.strip())
+                               username=username.strip(), ips=await scope.scope_ips(user))
 
 
 @router.get("/ssh/history/export")
@@ -367,7 +380,8 @@ async def export_ssh_history(request: Request, username: str = Query("", max_len
     tz = ss.tzinfo(await ss.get_settings())
     tzn = tz.key
     from services.ssh_audit import list_sessions
-    data = await list_sessions(active_only=False, limit=MAX_ROWS, offset=0, username=username.strip())
+    data = await list_sessions(active_only=False, limit=MAX_ROWS, offset=0, username=username.strip(),
+                               ips=await scope.scope_ips(user))
     await log_activity(user, "AUDIT_EXPORT", "INFO", None,
                        both(lambda: tr(f"{user.get('username')} mengekspor {len(data['items'])} baris riwayat SSH ke CSV",
                        f"{user.get('username')} exported {len(data['items'])} SSH history rows to CSV")), request)
@@ -395,11 +409,16 @@ async def ssh_kill_session(body: SshKillReq, request: Request, user: dict = Depe
     pool = await get_pool()
     async with pool.acquire() as conn:
         sess = await conn.fetchrow(
-            "SELECT id, username, client_ip, monitor_pid, child_pid FROM ssh_sessions WHERE id = $1 AND ended_at IS NULL",
+            "SELECT id, username, client_ip, monitor_pid, child_pid, targets FROM ssh_sessions WHERE id = $1 AND ended_at IS NULL",
             body.session_id)
     if not sess:
         raise HTTPException(404, tr("Sesi tidak ditemukan atau sudah berakhir",
                                     "Session not found or already ended"))
+    if scope.is_scoped(user):
+        mine = set(await scope.scope_ips(user) or [])
+        if not any(t.split(":")[0] in mine for t in sess["targets"]):
+            raise HTTPException(403, tr("Anda tidak ditugaskan untuk mengelola Proxmox ini",
+                                        "You are not assigned to manage this Proxmox"))
     target = None
     if body.block == "account":
         if not sess["username"]:

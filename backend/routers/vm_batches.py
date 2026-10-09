@@ -13,7 +13,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from auth import Role, get_current_user
-from services import vm_batches as vb
+from services import vm_batches as vb, scope
 from services.audit import both, log_activity
 from i18n import tr
 
@@ -45,6 +45,7 @@ class BatchBody(BaseModel):
 @router.post("/preview")
 async def preview(body: BatchBody, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, body.instance)
     return await vb.plan(body.instance, body.node, body.group_id, body.template_vmid, body.prefix, body.network_id,
                          body.os_username, body.memory_mb, body.start, body.user_ids)
 
@@ -52,6 +53,7 @@ async def preview(body: BatchBody, user: dict = Depends(get_current_user)):
 @router.post("")
 async def create(body: BatchBody, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, body.instance)
     batch_id = await vb.start(body.instance, body.node, body.model_dump(), user)
     batch = await vb.get(batch_id)
     await log_activity(user, "VM_BATCH_CREATE", "WARNING", {"id": str(batch_id), "name": f"{body.instance}/{body.node}"},
@@ -65,18 +67,24 @@ async def create(body: BatchBody, request: Request, user: dict = Depends(get_cur
 @router.get("")
 async def list_batches(user: dict = Depends(get_current_user)):
     _require_admin(user)
-    return await vb.recent()
+    allowed = await scope.allowed_labels(user)
+    if allowed is None:
+        return await vb.recent()
+    return [b for b in await vb.recent(200) if b["instance"] in allowed][:20]
 
 
 @router.get("/{batch_id}")
 async def get_batch(batch_id: int, user: dict = Depends(get_current_user)):
     _require_admin(user)
-    return await vb.get(batch_id)
+    batch = await vb.get(batch_id)
+    await scope.require_instance(user, batch["instance"])
+    return batch
 
 
 @router.get("/{batch_id}/credentials.csv")
 async def credentials(batch_id: int, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, (await vb.get(batch_id))["instance"])
     text = await vb.credentials_csv(batch_id)
     await log_activity(user, "CRED_VIEW", "WARNING", {"id": str(batch_id), "name": "vm-batch"},
                        both(lambda: tr(f"{user.get('username')} mengunduh kredensial VM massal batch #{batch_id}",
@@ -88,6 +96,7 @@ async def credentials(batch_id: int, request: Request, user: dict = Depends(get_
 @router.post("/{batch_id}/retry")
 async def retry(batch_id: int, request: Request, user: dict = Depends(get_current_user)):
     _require_admin(user)
+    await scope.require_instance(user, (await vb.get(batch_id))["instance"])
     await vb.retry(batch_id)
     await log_activity(user, "VM_BATCH_RETRY", "INFO", {"id": str(batch_id), "name": "vm-batch"},
                        both(lambda: tr(f"{user.get('username')} mengulang VM yang gagal di batch #{batch_id}",

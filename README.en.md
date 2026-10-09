@@ -28,6 +28,7 @@ A student signs in, sees the VMs assigned to them, and clicks **Connect**. An SS
 - OS accounts inside a VM through the QEMU Guest Agent: create users for shared VMs, reset the password of a user who forgot it, and delete users, without SSH or the old password.
 - System settings for superadmins: name, logo, accent colour, default language (Indonesian or English), time zone (a live date and time in the header), announcements, sign-up rules, defaults (VM lease, account validity), audit log retention, and the SSH bastion address. Helpdesk categories are managed from the Helpdesk page, and OS choices (with logos) from the Infra Requests page. A school or campus can adapt the dashboard without touching the code.
 - SSH from your own terminal (optional): through a bastion on the VPS with an SSH key, only to the VMs that belong to the user. Works for `scp`, `sftp` and VS Code Remote-SSH.
+- Sysadmin per Proxmox: a sysadmin can be limited to specific Proxmox servers. The limit covers VMs, networks, assignments, groups, tickets, Infra Requests, the activity log, Remote/Web/SSH sessions, Open Web, the SSH bastion and Guacamole access.
 - Audit & Remote:
   - An activity log that can be filtered by account, action, severity and date, exported to CSV, and shown in the language of the admin viewing it (Indonesian or English). Changes to accounts, groups, Proxmox instances, tickets and infrastructure requests are recorded.
   - A summary of failed sign-ins per account and per IP.
@@ -119,7 +120,7 @@ How to report a security issue is described in [SECURITY.md](SECURITY.md) (Engli
 ## Known limitations
 
 - Sign-in works with local dashboard accounts only.
-- Roles: superadmin, sysadmin and student. There are no per-student resource quotas.
+- Roles: superadmin, sysadmin and student. A superadmin manages every Proxmox; a sysadmin only the Proxmox servers assigned to them (set by a superadmin on the Users page), and without an assignment sees none. There are no per-student resource quotas.
 - There is no two-factor authentication (2FA) yet. Protect superadmin accounts with strong passwords.
 - The built-in backup is stored on the same server; copy it off the server yourself (see section 9 of the guide).
 - There are no outgoing notifications (email or messages) yet; service health is on the Status page.

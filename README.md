@@ -26,6 +26,7 @@ Mahasiswa login, melihat VM yang ditugaskan kepadanya, lalu klik **Connect**. Se
 - Akun OS di dalam VM lewat QEMU Guest Agent: membuat user untuk VM yang dipakai bersama, reset password untuk pengguna yang lupa, dan hapus user, tanpa SSH atau password lama.
 - Pengaturan Sistem untuk superadmin: nama, logo, warna aksen, bahasa bawaan (Indonesia/Inggris), zona waktu (jam dan tanggal berjalan di header), pengumuman, aturan pendaftaran, nilai bawaan (masa sewa VM, masa berlaku akun), lama penyimpanan log audit, dan alamat SSH bastion. Kategori helpdesk diatur dari halaman Helpdesk, dan pilihan OS (beserta logonya) dari halaman Infra Requests. Setiap sekolah atau kampus bisa menyesuaikan dashboard tanpa mengubah kode.
 - SSH dari terminal sendiri (opsional): lewat bastion di VPS dengan SSH key, hanya ke VM milik pengguna. Bisa untuk `scp`, `sftp`, dan VS Code Remote-SSH.
+- Sysadmin per Proxmox: satu sysadmin bisa dibatasi ke Proxmox tertentu. Pembatasan berlaku untuk VM, jaringan, penugasan, grup, tiket, Infra Request, Activity Log, sesi Remote/Web/SSH, Open Web, bastion SSH, dan akses Guacamole.
 - Audit & Remote:
   - Activity log yang bisa disaring per akun, aksi, tingkat, dan tanggal, diekspor ke CSV, dan tampil sesuai bahasa admin (Indonesia atau Inggris). Perubahan akun, grup, instance Proxmox, tiket, dan Infra Request ikut tercatat.
   - Rekap login gagal per akun dan per IP.
@@ -117,7 +118,7 @@ Cara melaporkan celah keamanan ada di [SECURITY.md](SECURITY.md) (bahasa Inggris
 ## Batasan yang diketahui
 
 - Login hanya dengan akun lokal dashboard.
-- Peran yang tersedia: superadmin, sysadmin, dan mahasiswa. Tidak ada kuota sumber daya per mahasiswa.
+- Peran yang tersedia: superadmin, sysadmin, dan mahasiswa. Superadmin mengelola semua Proxmox; sysadmin hanya Proxmox yang ditugaskan kepadanya (diatur superadmin di halaman Users), dan tanpa penugasan ia tidak melihat Proxmox apa pun. Tidak ada kuota sumber daya per mahasiswa.
 - Belum ada autentikasi dua faktor (2FA). Lindungi akun superadmin dengan password yang kuat.
 - Backup bawaan hanya disimpan di server yang sama; salin ke luar server sendiri (lihat Bagian 9 panduan).
 - Notifikasi keluar (email atau pesan) belum ada; kondisi layanan dilihat di halaman Status.

@@ -22,6 +22,7 @@ from services.guac_sync import (
     get_user_token,
 )
 from services.audit import both, log_activity, _client_ip
+from services import scope
 from services.login_rate_limit import (
     seconds_locked, record_failure, record_success, clear as clear_login_lock, allow as rate_allow,
 )
@@ -513,10 +514,15 @@ async def list_users(user: dict = Depends(require_sysadmin)):
             """SELECT u.id, u.username, u.full_name, u.role, u.email,
                       u.is_active, u.is_verified, u.last_login, u.created_at, u.expires_at,
                       u.must_change_password,
-                      ARRAY(SELECT gm.group_id FROM group_members gm WHERE gm.user_id = u.id) AS group_ids
+                      ARRAY(SELECT gm.group_id FROM group_members gm WHERE gm.user_id = u.id) AS group_ids,
+                      ARRAY(SELECT ui.instance FROM user_instances ui WHERE ui.user_id = u.id ORDER BY ui.instance) AS instances
                FROM users u WHERE u.deleted_at IS NULL ORDER BY u.role, u.username"""
         )
-    return [dict(r) for r in rows]
+    out = [dict(r) for r in rows]
+    if user["role"] != Role.SUPERADMIN:        # label Proxmox hanya untuk superadmin yang mengaturnya
+        for r in out:
+            r["instances"] = []
+    return out
 
 
 @router.post("")
@@ -890,10 +896,50 @@ async def delete_user_endpoint(user_id: int, request: Request, current: dict = D
     return {"status": "deleted", "user_id": user_id}
 
 
+# ── Proxmox yang dikelola sysadmin (hanya superadmin yang mengatur) ──────────
+class InstancesBody(BaseModel):
+    instances: list[str]
+
+
+async def _sysadmin_row(user_id: int):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT id, username, role FROM users WHERE id = $1 AND deleted_at IS NULL", user_id)
+    if not row:
+        raise HTTPException(404, tr("Pengguna tidak ditemukan", "User not found"))
+    if row["role"] != Role.SYSADMIN:
+        raise HTTPException(400, tr("Hanya akun sysadmin yang dibatasi per Proxmox. Superadmin mengelola semuanya",
+                                    "Only sysadmin accounts are limited per Proxmox. Superadmins manage everything"))
+    return row
+
+
+@router.get("/{user_id}/instances")
+async def get_user_instances(user_id: int, current: dict = Depends(require_superadmin)):
+    await _sysadmin_row(user_id)
+    return {"instances": sorted(await scope.labels_of(user_id))}
+
+
+@router.put("/{user_id}/instances")
+async def put_user_instances(user_id: int, body: InstancesBody, request: Request,
+                             current: dict = Depends(require_superadmin)):
+    row = await _sysadmin_row(user_id)
+    added, removed = await scope.set_instances(user_id, body.instances, current.get("username") or "")
+    # Akses Guacamole mengikuti: koneksi VM di Proxmox yang dicabut ikut dicabut, yang baru diberikan.
+    asyncio.create_task(guac_retry(grant_all_connections_to_admin, row["username"], op_name="instances:guac"))
+    names = lambda items: ", ".join(items) if items else "-"
+    await log_activity(current, "USER_INSTANCES", "WARNING", {"id": str(user_id), "name": row["username"]},
+                       both(lambda: tr(f"{current.get('username')} mengatur Proxmox untuk sysadmin '{row['username']}': "
+                                       f"ditambah {names(added)}; dicabut {names(removed)}",
+                                       f"{current.get('username')} set the Proxmox access of the sysadmin '{row['username']}': "
+                                       f"added {names(added)}; removed {names(removed)}")), request)
+    return {"instances": sorted(await scope.labels_of(user_id)), "added": added, "removed": removed}
+
+
 # ── VM Assignment (untuk student role) ───────────────────────
 @router.post("/vm-assignments")
 async def assign_vm(body: AssignVmRequest, request: Request, current: dict = Depends(require_sysadmin)):
     """Assign VM ke student, opsional dengan OS account tertentu."""
+    await scope.require_host(current, body.host_name)
     if body.access not in ("full", "web"):
         raise HTTPException(400, tr("access harus 'full' atau 'web'", "access must be 'full' or 'web'"))
     if body.access == "web" and body.os_account_id:
@@ -924,11 +970,19 @@ async def get_user_assignments(user_id: int, current: dict = Depends(require_sys
                WHERE va.user_id = $1 AND va.deleted_at IS NULL""",
             user_id
         )
-    return [dict(r) for r in rows]
+    allowed = await scope.allowed_labels(current)
+    return [dict(r) for r in rows if allowed is None or scope.host_label(r["host_name"]) in allowed]
 
 
 @router.delete("/{user_id}/vm-assignments/{vm_id}")
 async def remove_assignment(user_id: int, vm_id: str, request: Request, current: dict = Depends(require_sysadmin)):
+    if scope.is_scoped(current):
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            hosts = await conn.fetch(
+                "SELECT host_name FROM vm_assignments WHERE user_id = $1 AND vm_id = $2 AND deleted_at IS NULL", user_id, vm_id)
+        for h in hosts:
+            await scope.require_host(current, h["host_name"])
     await log_activity(current, "RBAC_UNASSIGN_VM", "WARNING",
                        {"id": vm_id, "name": vm_id},
                        both(lambda: tr(f"Unassign VM {vm_id} dari user #{user_id}", f"Unassigned VM {vm_id} from user #{user_id}")), request)

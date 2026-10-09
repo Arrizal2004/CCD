@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from auth import get_current_user, Role, SECRET_KEY
 from database import get_pool, get_student_vm_ids
+from services import scope
 from services.audit import both, log_activity
 from i18n import tr
 
@@ -94,6 +95,9 @@ async def _authorize(user: dict, ip) -> None:
                                         "You may only open web pages on VMs assigned to you"))
     elif not Role.has_permission(user["role"], Role.SYSADMIN):
         raise HTTPException(403, tr("Tidak diizinkan", "Not allowed"))
+    elif user["role"] == Role.SYSADMIN and str(ip) not in set(await scope.scope_ips(user) or []):
+        raise HTTPException(403, tr("Sysadmin hanya boleh membuka web di VM pada Proxmox yang ditugaskan kepadanya",
+                                    "Sysadmins may only open web pages on VMs of the Proxmox servers assigned to them"))
 
 
 def _proxy_path(sid: str, ip, port, path: str, created_at: datetime, user_id) -> str:
@@ -161,9 +165,13 @@ async def touch_session(sid: str, client_ip: str) -> bool:
     return True
 
 
-async def list_sessions(active_only: bool, limit: int = 50, offset: int = 0, username: str = "") -> dict:
+async def list_sessions(active_only: bool, limit: int = 50, offset: int = 0, username: str = "", ips=None) -> dict:
+    """ips: batasi ke sesi yang tujuannya salah satu IP ini (sysadmin: VM di Proxmox miliknya); None = semua."""
     where = ["revoked_at IS NULL AND expires_at > NOW()"] if active_only else []
     args: list = []
+    if ips is not None:
+        args.append(list(ips))
+        where.append(f"target_ip = ANY(${len(args)})")
     if username:
         args.append(username)
         where.append(f"lower(username) = lower(${len(args)})")

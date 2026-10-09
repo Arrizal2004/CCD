@@ -120,3 +120,14 @@ def student_token(client):
 
 def auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(autouse=True)
+def _sysadmin_not_scoped(request, monkeypatch):
+    """Sysadmin dibatasi per Proxmox (services/scope.py). Tes lama memakai satu akun sysadmin untuk label
+    Proxmox apa saja dan tidak menguji pembatasan, jadi di sana sysadmin diperlakukan tanpa batas.
+    Pembatasannya sendiri diuji di tests/test_instance_scope.py."""
+    if request.module.__name__.endswith("test_instance_scope"):
+        return
+    from services import scope
+    monkeypatch.setattr(scope, "is_scoped", lambda user: False)

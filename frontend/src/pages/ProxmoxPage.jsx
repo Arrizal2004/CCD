@@ -379,7 +379,7 @@ export default function ProxmoxPage({ currentUser }) {
 
             {canControl && instances.length === 0 && !loading ? (
                 <div style={{ padding: 30, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>
-                    {t('servers.noInstances')}
+                    {currentUser?.role === 'sysadmin' ? t('servers.noInstancesSysadmin') : t('servers.noInstances')}
                     {canControl && <div style={{ marginTop: 10 }}>
                         <button onClick={() => setShowInstances(true)}
                             style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, cursor: 'pointer', background: 'var(--cyan-glow)', border: '1px solid var(--cyan)', color: 'var(--cyan)' }}>

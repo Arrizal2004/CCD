@@ -140,6 +140,8 @@ export const dismissPasswordHelp = (id)  => api.post(`/api/v1/users/password-hel
 // Publik (halaman login): jawabannya selalu sama, terdaftar atau tidak.
 export const requestPasswordHelp = (username, message) =>
     axios.post(`${BASE}/api/v1/users/password-help`, { username, message }).then(r => r.data);
+export const fetchUserInstances = (user_id) => api.get(`/api/v1/users/${user_id}/instances`).then(r => r.data);
+export const saveUserInstances = (user_id, instances) => api.put(`/api/v1/users/${user_id}/instances`, { instances }).then(r => r.data);
 export const fetchUserAssignments = (user_id) => api.get(`/api/v1/users/${user_id}/vm-assignments`).then(r => r.data);
 export const assignVm = (user_id, vm_id, host_name, os_account_id = null, vm_name = null, access = 'full') =>
     api.post('/api/v1/users/vm-assignments', { user_id, vm_id, host_name, vm_name, os_account_id, access }).then(r => r.data);

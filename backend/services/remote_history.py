@@ -124,12 +124,25 @@ def _row(r) -> dict:
     }
 
 
-async def history(limit: int = 50, offset: int = 0, search: str = "", username: str = "") -> dict:
-    """Riwayat sesi Remote terbaru dulu. search: sebagian username atau nama VM; username: persis."""
+def _label_patterns(labels) -> list[str]:
+    """Pola LIKE untuk nama koneksi 'HV/<label>__<node>/...' dan 'HV/<label>/...' dari tiap label."""
+    out = []
+    for l in labels:
+        esc = l.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        out += [f"HV/{esc}\\_\\_%", f"HV/{esc}/%"]
+    return out
+
+
+async def history(limit: int = 50, offset: int = 0, search: str = "", username: str = "", labels=None) -> dict:
+    """Riwayat sesi Remote terbaru dulu. search: sebagian username atau nama VM; username: persis.
+    labels: batasi ke Proxmox-Proxmox ini (sysadmin); None = semua."""
     pool = await _get_pool()
     if pool is None:
-        return await _history_rest(limit, offset, search, username)
+        return await _history_rest(limit, offset, search, username, labels)
     where, args = [], []
+    if labels is not None:
+        args.append(_label_patterns(labels))
+        where.append(f"h.connection_name LIKE ANY(${len(args)})")
     if search:
         args.append(f"%{search}%")
         where.append(f"(h.username ILIKE ${len(args)} OR h.connection_name ILIKE ${len(args)})")
@@ -152,7 +165,7 @@ async def history(limit: int = 50, offset: int = 0, search: str = "", username: 
     return {"total": total or 0, "items": [_row(r) for r in rows]}
 
 
-async def _history_rest(limit: int, offset: int, search: str, username: str) -> dict:
+async def _history_rest(limit: int, offset: int, search: str, username: str, labels=None) -> dict:
     from services.guac_sync import get_connection_history
     try:
         rows = await get_connection_history(limit=500)
@@ -162,7 +175,8 @@ async def _history_rest(limit: int, offset: int, search: str, username: str) -> 
     s, u = search.lower(), username.lower()
     rows = [r for r in rows
             if (not s or s in (r["username"] or "").lower() or s in (r["connection"] or "").lower())
-            and (not u or (r["username"] or "").lower() == u)]
+            and (not u or (r["username"] or "").lower() == u)
+            and (labels is None or split_name(r["connection"] or "")[0].partition("__")[0] in labels)]
     for r in rows:
         r.setdefault("remote_host", "")
         r.setdefault("os_account", split_name(r["connection"])[2])

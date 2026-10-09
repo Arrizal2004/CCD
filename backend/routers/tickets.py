@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from database import get_pool, get_student_vm_ids
 from auth import get_current_user, require_superadmin, verify_token, Role
 from i18n import tr
+from services import scope
 
 # ── Flexible auth: Bearer header OR ?token= query param ──────────────────────
 # <img src> / <a href> cannot set headers, so the download endpoint also
@@ -262,6 +263,8 @@ async def create_ticket(body: CreateTicket, request: Request, user: dict = Depen
                    "to get full access to the Helpdesk.")
             )
     vm_id, host_name, ccd_id, vm = await _resolve_vm(body)
+    if host_name and scope.is_scoped(user):
+        await scope.require_host(user, host_name)
     # VMID hanya unik per Proxmox, jadi yang dicek pasangan host + VMID: mahasiswa hanya boleh
     # melaporkan VM miliknya.
     if user.get("role") == Role.STUDENT and host_name and \
@@ -299,6 +302,11 @@ async def list_tickets(
     where, params, i = [], [], 1
     if not _is_admin(user):
         where.append(f"t.student_id = ${i}"); params.append(int(user["sub"])); i += 1
+    allowed = await scope.allowed_labels(user)
+    if allowed is not None:
+        # Sysadmin: tiket tanpa VM, dan tiket untuk VM di Proxmox yang ditugaskan kepadanya.
+        where.append(f"(t.host_name IS NULL OR split_part(t.host_name, '__', 1) = ANY(${i}))")
+        params.append(list(allowed)); i += 1
     if status in STATUSES:
         where.append(f"t.status = ${i}"); params.append(status); i += 1
     if category and len(category) <= 30 and category.replace("_", "").isalnum():   # termasuk kategori lama
@@ -327,6 +335,9 @@ async def _get_ticket_or_403(conn, ticket_id: int, user: dict) -> dict:
     if not r:
         raise HTTPException(404, tr("Tiket tidak ditemukan", "Ticket not found"))
     if not _is_admin(user) and r["student_id"] != int(user["sub"]):
+        raise HTTPException(403, tr("Anda tidak punya akses ke tiket ini",
+                                    "You do not have access to this ticket"))
+    if r["host_name"] and not await scope.host_allowed(user, r["host_name"]):
         raise HTTPException(403, tr("Anda tidak punya akses ke tiket ini",
                                     "You do not have access to this ticket"))
     return dict(r)
@@ -493,9 +504,11 @@ async def update_status(ticket_id: int, body: StatusUpdate, request: Request, us
     pool = await get_pool()
     async with pool.acquire() as conn:
         cur = await conn.fetchrow(
-            "SELECT status, ticket_number FROM tickets WHERE id = $1", ticket_id)
+            "SELECT status, ticket_number, host_name FROM tickets WHERE id = $1", ticket_id)
         if not cur:
             raise HTTPException(404, tr("Tiket tidak ditemukan", "Ticket not found"))
+        if cur["host_name"] and not await scope.host_allowed(user, cur["host_name"]):
+            raise HTTPException(403, tr("Anda tidak punya akses ke tiket ini", "You do not have access to this ticket"))
         number = cur["ticket_number"]
         # Tiket yang sudah CLOSED terkunci: hanya superadmin yang boleh membuka/mengubah lagi.
         if cur["status"] == "CLOSED" and user["role"] != Role.SUPERADMIN:
@@ -619,12 +632,15 @@ async def ticket_ws(websocket: WebSocket, ticket_id: int, token: str = Query(...
     # RBAC: student hanya boleh join room tiket miliknya; admin/sysadmin/superadmin bebas
     pool = await get_pool()
     async with pool.acquire() as conn:
-        t = await conn.fetchrow("SELECT student_id FROM tickets WHERE id = $1", ticket_id)
+        t = await conn.fetchrow("SELECT student_id, host_name FROM tickets WHERE id = $1", ticket_id)
     if not t:
         await websocket.close(code=4404)
         return
     if not _is_admin(user) and t["student_id"] != int(user["sub"]):
         await websocket.close(code=1008)  # policy violation → 1008 close frame
+        return
+    if t["host_name"] and not await scope.host_allowed(user, t["host_name"]):
+        await websocket.close(code=1008)
         return
 
     manager.register(ticket_id, websocket)

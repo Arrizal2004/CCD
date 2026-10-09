@@ -280,6 +280,12 @@ async def guac_tunnel(
                            username, host_name, vm_id_clean)
             await websocket.close(code=4403)
             return
+    elif user_info.get("role") == "sysadmin":
+        from services import scope
+        if not await scope.host_allowed(user_info, host_name):
+            logger.warning("guac: akses ditolak — sysadmin %s tidak ditugaskan ke %s", username, host_name)
+            await websocket.close(code=4403)
+            return
 
     # guacamole-common-js meminta subprotocol "guacamole"
     await websocket.accept(subprotocol="guacamole")

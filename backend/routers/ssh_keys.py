@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from auth import get_current_user, Role
 from database import get_pool, get_student_vm_ids
+from services import scope
 from services.audit import both, log_activity
 from services.ssh_audit import handle_lines
 from i18n import tr
@@ -115,10 +116,16 @@ async def allowed_targets(user_id: int, role: str) -> list[str]:
                 f"OR ({a}guac_protocol = '' AND {a}os_type = 'linux'))")
 
     pool = await get_pool()
+    # Sysadmin hanya VM di Proxmox yang ditugaskan kepadanya; superadmin semua.
+    labels = list(await scope.labels_of(user_id)) if role == Role.SYSADMIN else None
+    lim = "" if labels is None else " AND split_part(host_name, '__', 1) = ANY($1)"
+    lim_args = () if labels is None else (labels,)
     async with pool.acquire() as conn:
-        creds = await conn.fetch(f"SELECT vm_id, host_name, ssh_host, ssh_port FROM vm_credentials WHERE {ssh_vm('')}")
+        creds = await conn.fetch(
+            f"SELECT vm_id, host_name, ssh_host, ssh_port FROM vm_credentials WHERE {ssh_vm('')}{lim}", *lim_args)
         if role in _ADMIN_ROLES:
-            accts = await conn.fetch(f"SELECT ssh_host, ssh_port FROM vm_os_accounts WHERE {ssh_vm('')}")
+            accts = await conn.fetch(
+                f"SELECT ssh_host, ssh_port FROM vm_os_accounts WHERE {ssh_vm('')}{lim}", *lim_args)
             rows = list(creds) + list(accts)
         else:
             allowed = await get_student_vm_ids(user_id, full_only=True)

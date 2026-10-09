@@ -5,6 +5,7 @@ import { leaseInfo } from '../format';
 import { locale, tNodes, useT } from '../i18n';
 import { parseCsv, CSV_TEMPLATE, credentialsCsv } from '../csv';
 import UserActivityModal from '../components/UserActivityModal';
+import UserInstancesModal from '../components/UserInstancesModal';
 import Icon from '../components/Icons';
 
 // Tanggal (YYYY-MM-DD) -> akhir hari itu di zona waktu browser, dan sebaliknya.
@@ -387,6 +388,7 @@ export default function UsersPage({ currentUser }) {
     const [sort, setSort]                 = useState({ col: 'role', dir: 'asc' });
     const [editUser, setEditUser]         = useState(null);
     const [activityOf, setActivityOf]     = useState('');
+    const [instancesOf, setInstancesOf]   = useState(null);   // sysadmin yang Proxmox-nya sedang diatur
     const [showNew, setShowNew]           = useState(false);
     const [confirmDlg, setConfirmDlg]     = useState(null); // { type, user }
     const [actionErr, setActionErr]       = useState('');
@@ -674,6 +676,17 @@ export default function UsersPage({ currentUser }) {
                                                     ))}
                                                 </div>
                                             )
+                                        ) : u.role === 'sysadmin' ? (
+                                            // Sysadmin dibatasi per Proxmox; hanya superadmin yang mengatur dan melihat daftarnya.
+                                            isSuperAdmin ? (
+                                                (u.instances || []).length === 0
+                                                    ? <span style={{ fontSize: 11, color: 'var(--yellow)' }}>{t('uinst.noneAssigned')}</span>
+                                                    : <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                                        {u.instances.map(l => (
+                                                            <span key={l} style={{ fontSize: 10, fontFamily: 'var(--fmono)', padding: '1px 7px', borderRadius: 8, background: 'var(--cyan-glow)', color: 'var(--cyan)' }}>{l}</span>
+                                                        ))}
+                                                    </div>
+                                            ) : <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>
                                         ) : (
                                             <span style={{ fontSize: 11, color: 'var(--text3)', fontStyle: 'italic' }}>{t('users.allVms')}</span>
                                         )}
@@ -729,6 +742,12 @@ export default function UsersPage({ currentUser }) {
                                             )}
                                             {u.id !== currentUser?.id && isSuperAdmin && (
                                                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                                    {u.role === 'sysadmin' && (
+                                                        <button onClick={() => setInstancesOf(u)} title={t('uinst.hintShort')}
+                                                            style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--cyan)', color: 'var(--cyan)', cursor: 'pointer' }}>
+                                                            {t('uinst.button')}
+                                                        </button>
+                                                    )}
                                                     <button onClick={() => setEditUser(u)} style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer' }}>{t('users.editBtn')}</button>
                                                     <button onClick={() => setConfirmDlg({ type: 'reset', user: u })} title={t('users.resetPassword')} style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--cyan)66', color: 'var(--cyan)', cursor: 'pointer' }}>{t('users.resetShort')}</button>
 
@@ -790,6 +809,7 @@ export default function UsersPage({ currentUser }) {
                     onClose={() => setConfirmDlg(null)} />
             )}
 
+            {instancesOf && <UserInstancesModal user={instancesOf} onClose={() => setInstancesOf(null)} onSaved={loadUsers} />}
             {resetResult && <ResetResultModal result={resetResult} onClose={() => setResetResult(null)} />}
             {activityOf && <UserActivityModal username={activityOf} onClose={() => setActivityOf('')} />}
 

@@ -234,9 +234,13 @@ async def vm_labels(conn, targets: list[str]) -> dict[str, str]:
     return {t: by_ip[ip] for t in targets if (ip := t.rsplit(":", 1)[0]) in by_ip}
 
 
-async def list_sessions(active_only: bool, limit: int = 50, offset: int = 0, username: str = "") -> dict:
+async def list_sessions(active_only: bool, limit: int = 50, offset: int = 0, username: str = "", ips=None) -> dict:
+    """ips: batasi ke sesi yang menuju salah satu IP ini (sysadmin: VM di Proxmox miliknya); None = semua."""
     where = ["ended_at IS NULL"] if active_only else []
     args: list = []
+    if ips is not None:
+        args.append(list(ips))
+        where.append(f"EXISTS (SELECT 1 FROM unnest(targets) t WHERE split_part(t, ':', 1) = ANY(${len(args)}))")
     if username:
         args.append(username)
         where.append(f"lower(username) = lower(${len(args)})")

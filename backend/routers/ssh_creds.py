@@ -20,8 +20,9 @@ from services.guac_sync import (
     get_connection_url_by_name, _conn_name_mandiri, _conn_name_group,
 )
 from i18n import tr
+from services import scope
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(scope.enforce_path)])
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────

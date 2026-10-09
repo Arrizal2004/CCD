@@ -744,34 +744,62 @@ async def delete_named_connection(name: str) -> bool:
 ADMIN_ROLES = {"superadmin", "sysadmin"}
 
 
+def _conn_label(name: str) -> str:
+    """Label Proxmox dari nama koneksi 'HV/<label>__<node>/<vm>' (atau 'HV/<label>/PROXMOX-HOST')."""
+    parts = (name or "").split("/", 2)
+    return parts[1].partition("__")[0] if len(parts) > 1 and parts[0] == "HV" else ""
+
+
 async def grant_all_connections_to_admin(username: str) -> None:
-    """Grant READ akses ke semua koneksi Guacamole untuk user admin/sysadmin/superadmin."""
+    """Samakan akses koneksi Guacamole seorang admin dengan haknya. Superadmin: semua koneksi.
+    Sysadmin: hanya koneksi VM di Proxmox yang ditugaskan kepadanya; koneksi di Proxmox lain dicabut."""
     all_conns, s = await _fetch("GET", f"/session/data/{GUAC_DS}/connections")
     if s != 200 or not isinstance(all_conns, dict):
         log.warning("grant_all_connections_to_admin: gagal fetch connections untuk %s", username)
         return
+    allowed = None                       # None = semua koneksi
+    try:
+        from database import get_pool
+        pool = await get_pool()
+        async with pool.acquire() as db:
+            row = await db.fetchrow("SELECT id, role FROM users WHERE username = $1 AND deleted_at IS NULL", username)
+            if row and row["role"] == "sysadmin":
+                allowed = {r["instance"] for r in await db.fetch(
+                    "SELECT instance FROM user_instances WHERE user_id = $1", row["id"])}
+    except Exception as e:
+        log.warning("grant_all_connections_to_admin: DB error untuk %s: %s", username, e)
+        return
     current_ids = set(await get_user_connections(username))
-    granted = 0
+    granted = revoked = 0
     for cid, c in all_conns.items():
         if not isinstance(c, dict):
             continue
         conn_id = c.get("identifier", cid)
-        if conn_id not in current_ids:
+        ok = allowed is None or _conn_label(c.get("name", "")) in allowed
+        if ok and conn_id not in current_ids:
             if await grant_connection(username, conn_id):
                 granted += 1
-    log.info("Guacamole: granted %d connections to admin user %s", granted, username)
+        elif not ok and conn_id in current_ids:
+            if await revoke_connection(username, conn_id):
+                revoked += 1
+    log.info("Guacamole: admin %s granted %d, revoked %d connections", username, granted, revoked)
 
 
 async def grant_vm_to_all_admins(conn_id: str) -> None:
-    """Saat VM connection baru dibuat, grant ke semua user admin/sysadmin/superadmin."""
+    """Saat koneksi VM baru dibuat: beri ke semua superadmin, dan ke sysadmin yang memegang Proxmox-nya."""
+    name, st = await _fetch("GET", f"/session/data/{GUAC_DS}/connections/{conn_id}")
+    label = _conn_label(name.get("name", "")) if st == 200 and isinstance(name, dict) else ""
     try:
         from database import get_pool
         pool = await get_pool()
         async with pool.acquire() as db:
             rows = await db.fetch(
-                "SELECT username FROM users WHERE role = ANY($1) AND is_active = true",
-                list(ADMIN_ROLES),
-            )
+                """SELECT u.username FROM users u
+                   WHERE u.is_active = true AND u.deleted_at IS NULL AND (
+                         u.role = 'superadmin'
+                      OR (u.role = 'sysadmin' AND $1 <> '' AND EXISTS (
+                            SELECT 1 FROM user_instances ui WHERE ui.user_id = u.id AND ui.instance = $1)))""",
+                label)
     except Exception as e:
         log.warning("grant_vm_to_all_admins: DB error: %s", e)
         return

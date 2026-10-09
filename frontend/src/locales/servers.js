@@ -38,6 +38,7 @@ export default {
     'servers.bulk': ['⧉ VM Massal', '⧉ Bulk VMs'],
     'servers.manage': ['Kelola Instance', 'Manage instances'],
     'servers.noInstances': ['Belum ada Proxmox instance dikonfigurasi.', 'No Proxmox instance has been configured yet.'],
+    'servers.noInstancesSysadmin': ['Anda belum ditugaskan ke Proxmox mana pun. Minta superadmin menugaskannya, atau tambahkan Proxmox baru (yang Anda tambahkan otomatis menjadi milik Anda).', 'You have not been assigned to any Proxmox yet. Ask a superadmin to assign one, or add a new Proxmox (one you add is automatically yours).'],
     'servers.addInstance': ['+ Tambah Instance', '+ Add instance'],
     'servers.manualHint': ['manual: {ip}', 'manual: {ip}'],
     'servers.manual': ['manual', 'manual'],
