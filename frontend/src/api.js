@@ -444,6 +444,9 @@ export const fetchAllProxmoxVmsFlat = async () => {
 };
 
 export const createOpenWebTicket = (url) => api.post('/api/v1/openweb/ticket', { url }).then(r => r.data);
+export const fetchMyOpenWebHistory = () => api.get('/api/v1/openweb/history').then(r => r.data);
+export const reopenOpenWeb = (id) => api.post(`/api/v1/openweb/sessions/${id}/open`).then(r => r.data);
+export const extendOpenWeb = (id) => api.post(`/api/v1/openweb/sessions/${id}/extend`).then(r => r.data);
 export const fetchProxmoxVmResources = (instance, node, vmid) => api.get(`${pveBase(instance, node)}/vms/${vmid}/resources`).then(r => r.data);
 export const updateProxmoxVmResources = (instance, node, vmid, body) => apiLong.put(`${pveBase(instance, node)}/vms/${vmid}/resources`, body).then(r => r.data);
 export const fetchMyProxmoxVms = () => api.get('/api/v1/proxmox/my-vms').then(r => r.data);

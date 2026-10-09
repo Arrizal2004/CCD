@@ -17,7 +17,7 @@ A student signs in, sees the VMs assigned to them, and clicks **Connect**. An SS
 - Create VMs from templates (clone and cloud-init), snapshots and rollback by students, and RAM, CPU and storage resize by admins. Resize only works while the VM is off, and storage can only grow.
 - Bulk VMs per class (one VM per group member, assigned right away, progress in the background, credentials as CSV), and a Create VM form that is prefilled from a student's infrastructure request.
 - SSH to the Proxmox host from the dashboard through Guacamole, for sysadmins and superadmins. The username and password are asked for every time and are never stored. Sysadmins can add Proxmox instances, but only superadmins can edit or delete them.
-- Open Web: open a web application running on a VM from inside the dashboard. Private addresses are loaded through the dashboard proxy.
+- Open Web: open a web application running on a VM from inside the dashboard. Private addresses are loaded through the dashboard proxy. Every user has a history of the addresses they opened (status and expiry), can reopen a session that is still valid, and can add 1 hour when less than 30 minutes remain.
 - Helpdesk tickets, including reports sent straight from the VM detail view, and VM requests (infrastructure requests). Superadmins can delete tickets and requests that are no longer needed; a summary stays in the audit log.
 - The dashboard and Connect work on phones and tablets.
 - Two languages, Indonesian and English, including error messages from the server. Each user picks their own with the ID / EN button.

@@ -20,7 +20,10 @@ from i18n import tr
 
 router = APIRouter()
 
-TICKET_TTL = 3600  # detik
+TICKET_TTL = 3600           # masa sesi saat dibuka (detik)
+EXTEND_STEP = 3600          # tiap perpanjangan menambah 1 jam
+EXTEND_WINDOW = 1800        # perpanjangan hanya boleh bila sisa waktu kurang dari 30 menit
+SESSION_MAX = 24 * 3600     # batas umur sebuah sesi; setelah itu buka sesi baru
 _KEY = hashlib.sha256((SECRET_KEY + ":openweb").encode()).digest()  # kunci terpisah dari JWT
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")  # Tailscale
 _PATH_RE = re.compile(r"^/openweb/([A-Za-z0-9_\-]+)/([0-9.]+)(?::(\d{1,5}))?(?:/|$)")
@@ -60,6 +63,46 @@ def _verify(ticket: str):
         return data if data.get("e", 0) > time.time() else None
     except Exception:
         return None
+
+
+def _parse_target(raw: str):
+    """(ip, port, path+query) dari alamat yang diketik; HTTPException 400 bila bukan http:// ke IP privat."""
+    u = urlsplit(raw.strip())
+    if u.scheme != "http":
+        raise HTTPException(400, tr("Proxy hanya mendukung alamat http:// untuk IP privat",
+                                    "The proxy only supports http:// addresses for private IPs"))
+    try:
+        ip = ipaddress.IPv4Address(u.hostname or "")
+        port = u.port
+    except ValueError:
+        raise HTTPException(400, tr("Alamat harus berupa IP privat yang valid",
+                                    "The address must be a valid private IP"))
+    if not _is_private_target(ip):
+        raise HTTPException(400, tr("Alamat bukan IP privat", "The address is not a private IP"))
+    path = u.path or "/"
+    if u.query:
+        path += "?" + u.query
+    return ip, port, path
+
+
+async def _authorize(user: dict, ip) -> None:
+    """Admin: semua IP privat. Student: hanya IP VM yang ditugaskan kepadanya (dicek lagi tiap membuka atau
+    memperpanjang, supaya akses yang sudah dicabut tidak bisa dilanjutkan lewat riwayat)."""
+    if user["role"] == Role.STUDENT:
+        if str(ip) not in await _student_ips(int(user["sub"])):
+            raise HTTPException(403, tr("Anda hanya boleh membuka web di VM yang ditugaskan kepada Anda",
+                                        "You may only open web pages on VMs assigned to you"))
+    elif not Role.has_permission(user["role"], Role.SYSADMIN):
+        raise HTTPException(403, tr("Tidak diizinkan", "Not allowed"))
+
+
+def _proxy_path(sid: str, ip, port, path: str, created_at: datetime, user_id) -> str:
+    """Path proxy untuk sesi ini. Tiket berlaku sampai batas umur sesi; yang menentukan masa berlaku
+    sebenarnya adalah baris sesi di database, jadi perpanjangan tidak mengubah path yang sedang terbuka."""
+    host = f"{ip}:{port}" if port else str(ip)
+    exp = int((created_at + timedelta(seconds=SESSION_MAX)).timestamp())
+    ticket = _sign(json.dumps({"h": str(ip), "u": str(user_id), "s": sid, "e": exp}, separators=(",", ":")).encode())
+    return f"/openweb/{ticket}/{host}{path}"
 
 
 def _is_private_target(ip: ipaddress.IPv4Address) -> bool:
@@ -151,44 +194,124 @@ async def revoke_session(sid: str, by: str) -> dict | None:
 
 @router.post("/ticket")
 async def create_ticket(body: TicketBody, request: Request, user: dict = Depends(get_current_user)):
-    u = urlsplit(body.url.strip())
-    if u.scheme != "http":
-        raise HTTPException(400, tr("Proxy hanya mendukung alamat http:// untuk IP privat",
-                                    "The proxy only supports http:// addresses for private IPs"))
-    try:
-        ip = ipaddress.IPv4Address(u.hostname or "")
-        port = u.port
-    except ValueError:
-        raise HTTPException(400, tr("Alamat harus berupa IP privat yang valid",
-                                    "The address must be a valid private IP"))
-    if not _is_private_target(ip):
-        raise HTTPException(400, tr("Alamat bukan IP privat", "The address is not a private IP"))
-
-    if user["role"] == Role.STUDENT:
-        if str(ip) not in await _student_ips(int(user["sub"])):
-            raise HTTPException(403, tr("Anda hanya boleh membuka web di VM yang ditugaskan kepada Anda",
-                                        "You may only open web pages on VMs assigned to you"))
-    elif not Role.has_permission(user["role"], Role.SYSADMIN):
-        raise HTTPException(403, tr("Tidak diizinkan", "Not allowed"))
+    ip, port, path = _parse_target(body.url)
+    await _authorize(user, ip)
 
     host = f"{ip}:{port}" if port else str(ip)
-    sid = uuid.uuid4().hex
-    expires = datetime.now(timezone.utc) + timedelta(seconds=TICKET_TTL)
     pool = await get_pool()
+    # Alamat yang sama dan sesinya masih berlaku: pakai lagi, jangan menumpuk sesi baru.
+    async with pool.acquire() as conn:
+        same = await conn.fetchrow(
+            """SELECT id, created_at, expires_at FROM openweb_sessions
+               WHERE user_id = $1 AND url = $2 AND revoked_at IS NULL AND expires_at > NOW()
+               ORDER BY created_at DESC LIMIT 1""", int(user["sub"]), body.url.strip()[:2000])
+    if same:
+        return {"proxy_path": _proxy_path(same["id"], ip, port, path, same["created_at"], user["sub"]),
+                "session_id": same["id"], "expires_at": same["expires_at"].isoformat(), "reused": True}
+    sid = uuid.uuid4().hex
+    created = datetime.now(timezone.utc)
+    expires = created + timedelta(seconds=TICKET_TTL)
     async with pool.acquire() as conn:
         await conn.execute(
-            """INSERT INTO openweb_sessions (id, user_id, username, role, target_ip, expires_at)
-               VALUES ($1, $2, $3, $4, $5, $6)""",
-            sid, int(user["sub"]), user.get("username") or "", user.get("role") or "", str(ip), expires)
+            """INSERT INTO openweb_sessions (id, user_id, username, role, target_ip, url, created_at, expires_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
+            sid, int(user["sub"]), user.get("username") or "", user.get("role") or "", str(ip),
+            body.url.strip()[:2000], created, expires)
     await log_activity(user, "OPENWEB_OPEN", "INFO", {"id": str(ip), "name": host},
                        both(lambda: tr(f"{user.get('username')} membuka Open Web ke {host} (sesi {sid[:8]})",
                                     f"{user.get('username')} opened Open Web to {host} (session {sid[:8]})")), request)
-    ticket = _sign(json.dumps({"h": str(ip), "u": user["sub"], "s": sid, "e": int(expires.timestamp())},
-                              separators=(",", ":")).encode())
-    path = u.path or "/"
-    if u.query:
-        path += "?" + u.query
-    return {"proxy_path": f"/openweb/{ticket}/{host}{path}"}
+    return {"proxy_path": _proxy_path(sid, ip, port, path, created, user["sub"]),
+            "session_id": sid, "expires_at": expires.isoformat()}
+
+
+_HISTORY_SQL = """SELECT id, url, target_ip, created_at, expires_at,
+       CASE WHEN revoked_at IS NOT NULL THEN 'revoked' WHEN expires_at <= NOW() THEN 'expired' ELSE 'active' END AS status,
+       GREATEST(EXTRACT(EPOCH FROM (expires_at - NOW())), 0)::int AS remaining
+       FROM openweb_sessions WHERE user_id = $1 AND url IS NOT NULL ORDER BY created_at DESC LIMIT $2"""
+
+
+@router.get("/history")
+async def history(limit: int = 20, user: dict = Depends(get_current_user)):
+    """Sesi Open Web milik pengguna ini (semua peran): alamat, status, dan sampai kapan berlaku."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(_HISTORY_SQL, int(user["sub"]), max(1, min(limit, 50)))
+    items = []
+    for r in rows:
+        active = r["status"] == "active"
+        age_left = SESSION_MAX - (datetime.now(timezone.utc) - r["created_at"]).total_seconds()
+        items.append({
+            "id": r["id"], "url": r["url"], "status": r["status"],
+            "created_at": r["created_at"].isoformat(), "expires_at": r["expires_at"].isoformat(),
+            "remaining": r["remaining"] if active else 0,
+            # Boleh ditambah bila sisa waktu < 30 menit dan umur sesi belum mencapai batas.
+            "can_extend": active and r["remaining"] < EXTEND_WINDOW and age_left > r["remaining"],
+            "extend_in": max(0, r["remaining"] - EXTEND_WINDOW) if active else 0,
+        })
+    return {"items": items, "extend_window": EXTEND_WINDOW, "extend_step": EXTEND_STEP}
+
+
+async def _own_session(conn, sid: str, user: dict):
+    row = await conn.fetchrow(
+        """SELECT id, url, target_ip, created_at, expires_at, revoked_at FROM openweb_sessions
+           WHERE id = $1 AND user_id = $2 AND url IS NOT NULL""", sid, int(user["sub"]))
+    if not row:
+        raise HTTPException(404, tr("Sesi Open Web tidak ditemukan", "Open Web session not found"))
+    return row
+
+
+def _require_active(row) -> None:
+    if row["revoked_at"] is not None:
+        raise HTTPException(409, tr("Sesi ini sudah dicabut. Buka sesi baru", "This session was revoked. Open a new session"))
+    if row["expires_at"] <= datetime.now(timezone.utc):
+        raise HTTPException(409, tr("Sesi ini sudah habis. Buka sesi baru", "This session has expired. Open a new session"))
+
+
+@router.post("/sessions/{sid}/open")
+async def reopen(sid: str, user: dict = Depends(get_current_user)):
+    """Buka lagi sesi yang masih berlaku (mis. setelah tidak sengaja keluar), tanpa membuat sesi baru."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await _own_session(conn, sid, user)
+    _require_active(row)
+    ip, port, path = _parse_target(row["url"])
+    await _authorize(user, ip)
+    return {"proxy_path": _proxy_path(sid, ip, port, path, row["created_at"], user["sub"]),
+            "session_id": sid, "expires_at": row["expires_at"].isoformat(), "url": row["url"]}
+
+
+@router.post("/sessions/{sid}/extend")
+async def extend(sid: str, request: Request, user: dict = Depends(get_current_user)):
+    """Tambah 1 jam. Hanya bila sisa waktu kurang dari 30 menit, dan sampai batas umur sesi (24 jam)."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await _own_session(conn, sid, user)
+    _require_active(row)
+    ip, port, _ = _parse_target(row["url"])
+    await _authorize(user, ip)
+    async with pool.acquire() as conn:
+        new = await conn.fetchval(
+            """UPDATE openweb_sessions
+                  SET expires_at = LEAST(expires_at + make_interval(secs => $2), created_at + make_interval(secs => $4))
+                WHERE id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+                  AND expires_at <= NOW() + make_interval(secs => $3)
+                  AND expires_at < created_at + make_interval(secs => $4)
+                RETURNING expires_at""", sid, EXTEND_STEP, EXTEND_WINDOW, SESSION_MAX)
+        if new is None:
+            left = int((row["expires_at"] - datetime.now(timezone.utc)).total_seconds())
+            if left >= EXTEND_WINDOW:
+                mins = max(1, (left - EXTEND_WINDOW + 59) // 60)
+                raise HTTPException(409, tr(f"Waktu baru bisa ditambah saat sisanya kurang dari 30 menit (sekitar {mins} menit lagi)",
+                                            f"Time can only be added when less than 30 minutes remain (in about {mins} minutes)"))
+            raise HTTPException(409, tr("Sesi ini sudah mencapai batas 24 jam. Buka sesi baru",
+                                        "This session reached its 24-hour limit. Open a new session"))
+    _cache.pop(sid, None)
+    host = f"{ip}:{port}" if port else str(ip)
+    stamp = new.strftime("%H:%M")
+    await log_activity(user, "OPENWEB_EXTEND", "INFO", {"id": str(ip), "name": host},
+                       both(lambda: tr(f"{user.get('username')} menambah waktu sesi Open Web ke {host} (sesi {sid[:8]}) sampai {stamp} UTC",
+                                       f"{user.get('username')} extended the Open Web session to {host} (session {sid[:8]}) until {stamp} UTC")), request)
+    return {"expires_at": new.isoformat(), "remaining": max(0, int((new - datetime.now(timezone.utc)).total_seconds()))}
 
 
 @router.get("/auth")
