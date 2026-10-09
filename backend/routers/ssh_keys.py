@@ -121,11 +121,11 @@ async def allowed_targets(user_id: int, role: str) -> list[str]:
             accts = await conn.fetch(f"SELECT ssh_host, ssh_port FROM vm_os_accounts WHERE {ssh_vm('')}")
             rows = list(creds) + list(accts)
         else:
-            allowed = await get_student_vm_ids(user_id)
+            allowed = await get_student_vm_ids(user_id, full_only=True)
             accts = await conn.fetch(
                 f"""SELECT voa.ssh_host, voa.ssh_port FROM vm_assignments va
                     JOIN vm_os_accounts voa ON voa.id = va.os_account_id
-                    WHERE va.user_id = $1 AND va.deleted_at IS NULL AND {ssh_vm('voa.')}""",
+                    WHERE va.user_id = $1 AND va.deleted_at IS NULL AND va.access = 'full' AND {ssh_vm('voa.')}""",
                 user_id)
             rows = [r for r in creds if (r["vm_id"], r["host_name"]) in allowed] + list(accts)
     return sorted({t for r in rows if (t := _target(r["ssh_host"], r["ssh_port"]))})

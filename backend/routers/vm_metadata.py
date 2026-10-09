@@ -28,7 +28,7 @@ async def list_metadata(host_name: str, request: Request, user: dict = Depends(g
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT * FROM vm_metadata WHERE host_name = $1", host_name)
-    return [_normalize(dict(r)) for r in rows]
+    return [_for_viewer(_normalize(dict(r)), user) for r in rows]
 
 
 @router.get("/{host_name}/{vm_id}", response_model=VmMetadataResponse)
@@ -40,7 +40,7 @@ async def get_metadata(host_name: str, vm_id: str, user: dict = Depends(get_curr
             vm_id, host_name)
     if not row:
         raise HTTPException(status_code=404, detail="Metadata not found")
-    return _normalize(dict(row))
+    return _for_viewer(_normalize(dict(row)), user)
 
 
 class VmMetadataUpsert(BaseModel):
@@ -107,6 +107,15 @@ async def delete_metadata(host_name: str, vm_id: str, user: dict = Depends(get_c
             "DELETE FROM vm_metadata WHERE vm_id = $1 AND host_name = $2",
             vm_id, host_name)
     return {"status": "deleted"}
+
+
+def _for_viewer(row: dict, user: dict) -> dict:
+    """Login VM yang tersimpan di metadata hanya untuk admin. Student mengambil kredensialnya lewat
+    /ssh-creds/my-vm-cred, yang menolak VM dengan akses 'Hanya Open Web'."""
+    if user["role"] not in _ADMIN_ROLES:
+        row["vm_username"] = ""
+        row["vm_password"] = ""
+    return row
 
 
 def _normalize(row: dict) -> dict:

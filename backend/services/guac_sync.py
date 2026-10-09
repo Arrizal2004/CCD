@@ -422,6 +422,21 @@ async def revoke_connection(username: str, conn_id: str) -> bool:
     return s < 300
 
 
+async def revoke_vm_connections(username: str, host_name: str, vm_name: str) -> int:
+    """Cabut semua koneksi Guacamole satu VM (utama, OS account, mandiri, dan grup) dari user.
+    Dipakai saat akses VM menjadi 'Hanya Open Web'. Return jumlah koneksi yang dicabut."""
+    all_conns, s = await _fetch("GET", f"/session/data/{GUAC_DS}/connections")
+    if s != 200 or not isinstance(all_conns, dict):
+        return 0
+    base = _conn_name(host_name, vm_name)
+    ids = {c.get("identifier", k) for k, c in all_conns.items()
+           if isinstance(c, dict) and (c.get("name") == base or str(c.get("name", "")).startswith(base + "@"))}
+    mine = ids & set(await get_user_connections(username))
+    for cid in mine:
+        await revoke_connection(username, cid)
+    return len(mine)
+
+
 async def get_user_connections(username: str) -> list[str]:
     """Return list conn_id yang bisa diakses user ini."""
     data, s = await _fetch("GET", f"/session/data/{GUAC_DS}/users/{username}/permissions")

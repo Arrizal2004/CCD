@@ -11,7 +11,7 @@ Mahasiswa login, melihat VM yang ditugaskan kepadanya, lalu klik **Connect**. Se
 ## Fitur
 
 - Connect SSH dan RDP dari browser.
-- Akses per VM atau per group. Mahasiswa hanya melihat VM miliknya, tanpa nama host Proxmox.
+- Akses per VM atau per group. Mahasiswa hanya melihat VM miliknya, tanpa nama host Proxmox. Akses bisa dibatasi ke "Hanya Open Web": mahasiswa hanya melihat status VM, membuka web di VM itu, dan membuat tiket Helpdesk, tanpa Connect, kredensial, power, dan snapshot.
 - Membuat VM dari template (clone dan cloud-init), snapshot dan rollback oleh mahasiswa, dan resize RAM, CPU, serta storage oleh admin. Resize hanya saat VM mati, dan storage hanya bisa diperbesar.
 - VM massal per kelas (satu VM per anggota grup, langsung di-assign, progres di latar belakang, kredensial CSV) dan Create VM yang terisi otomatis dari spek Infra Request mahasiswa.
 - SSH ke host Proxmox dari dashboard lewat Guacamole untuk sysadmin dan superadmin. Username dan password diminta setiap kali dan tidak disimpan. Instance Proxmox bisa ditambah sysadmin, tetapi hanya superadmin yang boleh mengubah atau menghapusnya.

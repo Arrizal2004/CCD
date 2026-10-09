@@ -42,7 +42,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from auth import get_current_user, Role
-from database import get_pool, get_student_vm_ids
+from database import get_pool, get_student_vm_access
+from services import vm_access
 from services import proxmox_instances as pve_instances
 from services.proxmox_client import ProxmoxError
 from services.audit import both, log_activity
@@ -71,15 +72,17 @@ def _require_superadmin(user: dict):
                                                        "Only superadmins can edit or delete Proxmox instances"))
 
 
-async def _require_admin_or_assigned(user: dict, host_key: str, vmid: int):
+async def _require_admin_or_assigned(user: dict, host_key: str, vmid: int, full: bool = False):
     """Admin/sysadmin selalu boleh. Student boleh kalau VM ini di-assign ke mereka
-    (langsung via vm_assignments, atau lewat grup via group_vm_access)."""
+    (langsung via vm_assignments, atau lewat grup via group_vm_access). full=True untuk aksi yang
+    tidak boleh dilakukan student dengan akses 'Hanya Open Web' (power, snapshot)."""
     if user.get("role") in _ADMIN_ROLES:
         return
-    allowed = await get_student_vm_ids(int(user["sub"]), host_key)
-    if (str(vmid), host_key) not in allowed:
-        raise HTTPException(status_code=403, detail=tr("Anda tidak punya akses ke VM ini",
-                                                       "You do not have access to this VM"))
+    level = (await get_student_vm_access(int(user["sub"]), host_key)).get((str(vmid), host_key))
+    if level is None:
+        raise vm_access.no_access_error()
+    if full and level != "full":
+        raise vm_access.web_only_error()
 
 
 def _host_key(label: str, node: str) -> str:
@@ -389,7 +392,8 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
     if user.get("role") in _ADMIN_ROLES:
         visible = {str(vm["vmid"]) for vm in vms}
     else:
-        visible = {vid for vid, _ in await get_student_vm_ids(int(user["sub"]), host_key)}
+        levels = await get_student_vm_access(int(user["sub"]), host_key)
+        visible = {vid for vid, _ in levels}
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT vm_id, ssh_host, ssh_port FROM vm_credentials WHERE host_name = $1", host_key)
@@ -406,6 +410,8 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
         meta = vm_rows.get(vid)
         vm["ccd_id"] = meta["ccd_id"] if meta else None   # nomor unik lintas Proxmox (migrations/V006)
         vm["lease_until"] = meta["lease_until"].isoformat() if meta and meta["lease_until"] else None
+        if user.get("role") not in _ADMIN_ROLES:
+            vm["access"] = levels.get((vid, host_key), "full")
         if vid in visible:
             vm["ip"] = agent.get(vid)
             vm["manual_ip"] = manual.get(vid)
@@ -422,7 +428,7 @@ async def get_vms(label: str, node: str, user: dict = Depends(get_current_user))
 async def get_my_vms(user: dict = Depends(get_current_user)):
     """VM milik user ini lintas instance/node (untuk student: tampilan Servers/Topology tanpa perlu
     memilih host). Tiap item diberi `instance` dan `node` hanya untuk dipakai klien saat memanggil aksi."""
-    allowed = await get_student_vm_ids(int(user["sub"]))
+    allowed = await get_student_vm_access(int(user["sub"]))
     host_keys = {host_key for _, host_key in allowed if "__" in host_key}
     result = []
     for host_key in sorted(host_keys):
@@ -450,7 +456,7 @@ async def get_vm_detail(label: str, node: str, vmid: int, user: dict = Depends(g
 
 @router.post("/instances/{label}/nodes/{node}/vms/{vmid}/action")
 async def post_vm_action(label: str, node: str, vmid: int, body: VmActionRequest, user: dict = Depends(get_current_user)):
-    await _require_admin_or_assigned(user, _host_key(label, node), vmid)
+    await _require_admin_or_assigned(user, _host_key(label, node), vmid, full=True)
     if user.get("role") not in _ADMIN_ROLES and body.action in ("start", "resume", "reboot"):
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -718,7 +724,7 @@ async def get_rrddata(label: str, node: str, vmid: int, timeframe: str = "hour",
 
 @router.get("/instances/{label}/nodes/{node}/vms/{vmid}/snapshots")
 async def get_snapshots(label: str, node: str, vmid: int, user: dict = Depends(get_current_user)):
-    await _require_admin_or_assigned(user, _host_key(label, node), vmid)
+    await _require_admin_or_assigned(user, _host_key(label, node), vmid, full=True)
     client = await _get_client(label)
     try:
         snaps = await client.list_snapshots(node, vmid)
@@ -730,7 +736,7 @@ async def get_snapshots(label: str, node: str, vmid: int, user: dict = Depends(g
 
 @router.post("/instances/{label}/nodes/{node}/vms/{vmid}/snapshots")
 async def post_snapshot(label: str, node: str, vmid: int, body: SnapshotCreateRequest, user: dict = Depends(get_current_user)):
-    await _require_admin_or_assigned(user, _host_key(label, node), vmid)
+    await _require_admin_or_assigned(user, _host_key(label, node), vmid, full=True)
     if not body.snapname or not body.snapname.replace("_", "").replace("-", "").isalnum():
         raise HTTPException(status_code=400, detail=tr("Nama snapshot hanya boleh huruf/angka/underscore/dash",
                                                        "Snapshot names may only contain letters, digits, underscores and dashes"))
@@ -771,7 +777,7 @@ async def delete_snapshot(label: str, node: str, vmid: int, snapname: str, user:
 
 @router.post("/instances/{label}/nodes/{node}/vms/{vmid}/snapshots/{snapname}/rollback")
 async def rollback_snapshot(label: str, node: str, vmid: int, snapname: str, user: dict = Depends(get_current_user)):
-    await _require_admin_or_assigned(user, _host_key(label, node), vmid)
+    await _require_admin_or_assigned(user, _host_key(label, node), vmid, full=True)
     client = await _get_client(label)
     try:
         upid = await client.rollback_snapshot(node, vmid, snapname)
@@ -794,8 +800,9 @@ async def get_my_assigned_vmids(label: str, node: str, user: dict = Depends(get_
     admin/sysadmin: semua, jadi dikembalikan kosong — frontend admin tidak perlu daftar ini)."""
     if user.get("role") in _ADMIN_ROLES:
         return {"vmids": [], "all": True}
-    allowed = await get_student_vm_ids(int(user["sub"]), _host_key(label, node))
-    return {"vmids": [vm_id for vm_id, _ in allowed], "all": False}
+    levels = await get_student_vm_access(int(user["sub"]), _host_key(label, node))
+    return {"vmids": [vm_id for vm_id, _ in levels], "all": False,
+            "web_only": [vm_id for (vm_id, _), level in levels.items() if level != "full"]}
 
 
 # ── Create VM from template (clone + cloud-init) ─────────────────────────────

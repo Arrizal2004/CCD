@@ -13,7 +13,7 @@ A student signs in, sees the VMs assigned to them, and clicks **Connect**. An SS
 ## Features
 
 - SSH and RDP from the browser.
-- Access per VM or per group. Students only see their own VMs, without Proxmox host names.
+- Access per VM or per group. Students only see their own VMs, without Proxmox host names. Access can be limited to "Open Web only": the student sees the VM status, opens the web page on that VM and files Helpdesk tickets, without Connect, credentials, power or snapshots.
 - Create VMs from templates (clone and cloud-init), snapshots and rollback by students, and RAM, CPU and storage resize by admins. Resize only works while the VM is off, and storage can only grow.
 - Bulk VMs per class (one VM per group member, assigned right away, progress in the background, credentials as CSV), and a Create VM form that is prefilled from a student's infrastructure request.
 - SSH to the Proxmox host from the dashboard through Guacamole, for sysadmins and superadmins. The username and password are asked for every time and are never stored. Sysadmins can add Proxmox instances, but only superadmins can edit or delete them.

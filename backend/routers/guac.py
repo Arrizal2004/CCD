@@ -274,7 +274,7 @@ async def guac_tunnel(
             logger.warning("guac: akses ditolak — student %s tanpa vm_id", username)
             await websocket.close(code=4403)
             return
-        allowed = await get_student_vm_ids(int(user_info["sub"]), host_name)
+        allowed = await get_student_vm_ids(int(user_info["sub"]), host_name, full_only=True)
         if (vm_id_clean, host_name) not in allowed:
             logger.warning("guac: akses ditolak — student %s tidak punya akses ke %s/%s",
                            username, host_name, vm_id_clean)

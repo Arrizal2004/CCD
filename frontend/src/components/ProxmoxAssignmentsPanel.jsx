@@ -38,7 +38,7 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
             await Promise.all(studs.map(async s => {
                 const as = await fetchUserAssignments(s.id);
                 const match = as.find(a => a.vm_id === vmIdStr && a.host_name === hostName);
-                map[s.id] = match ? { os_account_id: match.os_account_id || null, os_username: match.os_username || null } : null;
+                map[s.id] = match ? { os_account_id: match.os_account_id || null, os_username: match.os_username || null, access: match.access || 'full' } : null;
             }));
             setAssignments(map);
         } catch (e) {
@@ -50,12 +50,12 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
 
     useEffect(() => { load(); }, [load]);
 
-    const doAssign = async (student, osAccountId = null) => {
+    const doAssign = async (student, osAccountId = null, access = 'full') => {
         setPickingFor(null);
         try {
-            await assignVm(student.id, vmIdStr, hostName, osAccountId, vmName);
+            await assignVm(student.id, vmIdStr, hostName, osAccountId, vmName, access);
             const acc = osAccounts.find(a => a.id === osAccountId);
-            setAssignments(p => ({ ...p, [student.id]: { os_account_id: osAccountId, os_username: acc?.os_username || null } }));
+            setAssignments(p => ({ ...p, [student.id]: { os_account_id: osAccountId, os_username: acc?.os_username || null, access } }));
         } catch (e) {
             alert(t('asg.assignFailed', { msg: e?.response?.data?.detail || e.message }));
         }
@@ -117,7 +117,12 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
                                             {asgn.os_username}
                                         </span>
                                     )}
-                                    {asgn && !asgn.os_username && <span style={{ fontSize: 10, color: 'var(--text3)' }}>{t('asg.defaultCred')}</span>}
+                                    {asgn && asgn.access === 'web' && (
+                                        <span title={t('asg.webOnlyHint')} style={{ fontSize: 10, fontFamily: 'var(--fmono)', padding: '1px 6px', borderRadius: 8, border: '1px solid var(--yellow)', color: 'var(--yellow)' }}>
+                                            {t('asg.webOnly')}
+                                        </span>
+                                    )}
+                                    {asgn && !asgn.os_username && asgn.access !== 'web' && <span style={{ fontSize: 10, color: 'var(--text3)' }}>{t('asg.defaultCred')}</span>}
                                 </div>
                             </div>
                             <button onClick={() => toggleAssign(s)}
@@ -138,6 +143,10 @@ export default function ProxmoxAssignmentsPanel({ hostName, vmid, vmName }) {
                                     <button onClick={() => doAssign(s, null)}
                                         style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'var(--bg-hover)', color: 'var(--text2)', border: '1px solid var(--border)' }}>
                                         {t('asg.defaultCredBtn')}
+                                    </button>
+                                    <button onClick={() => doAssign(s, null, 'web')} title={t('asg.webOnlyHint')}
+                                        style={{ padding: '4px 10px', borderRadius: 6, fontSize: 11, cursor: 'pointer', background: 'transparent', color: 'var(--yellow)', border: '1px solid var(--yellow)' }}>
+                                        {t('asg.webOnlyBtn')}
                                     </button>
                                     {osAccounts.map(acc => (
                                         <button key={acc.id} onClick={() => doAssign(s, acc.id)}

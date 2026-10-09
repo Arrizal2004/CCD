@@ -149,6 +149,7 @@ function MembersPanel({ group, allStudents }) {
 const AUTH_MODES = [
     { value: 'mandiri', label: 'groups.modeMandiri', desc: 'groups.modeMandiriDesc' },
     { value: 'credentials', label: 'groups.modeCreds', desc: 'groups.modeCredsDesc' },
+    { value: 'web', label: 'groups.modeWeb', desc: 'groups.modeWebDesc' },
 ];
 
 // canApplyInVm: VM Proxmox, jadi akun kredensial grup bisa dibuat atau diperbarui di dalam VM lewat
@@ -168,8 +169,11 @@ function AuthModeForm({ value, onChange, canApplyInVm = false }) {
             <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 2 }}>{t('groups.connMode')}</div>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {AUTH_MODES.map(m => (
-                    <button key={m.value} onClick={() => onChange({ ...value, auth_mode: m.value })}
-                        style={{ ...radioSt(value.auth_mode === m.value), flex: '1 1 150px' }}>
+                    <button key={m.value}
+                        onClick={() => onChange(m.value === 'web'
+                            ? { ...value, access: 'web', auth_mode: 'mandiri' }
+                            : { ...value, access: 'full', auth_mode: m.value })}
+                        style={{ ...radioSt((value.access === 'web' ? 'web' : value.auth_mode) === m.value), flex: '1 1 150px' }}>
                         <div style={{ fontWeight: 600 }}>{t(m.label)}</div>
                         <div style={{ fontSize: 10, marginTop: 2, color: 'var(--text3)' }}>{t(m.desc)}</div>
                     </button>
@@ -234,7 +238,7 @@ function AuthModeForm({ value, onChange, canApplyInVm = false }) {
 
 // ── VM Access Panel ───────────────────────────────────────────────────────────
 
-const emptyAuthForm = { auth_mode: 'mandiri', os_type: 'linux', guac_protocol: '', os_username: '', os_password: '', apply_in_vm: false };
+const emptyAuthForm = { access: 'full', auth_mode: 'mandiri', os_type: 'linux', guac_protocol: '', os_username: '', os_password: '', apply_in_vm: false };
 const isProxmoxHost = (host) => (host || '').includes('__');
 
 function VmAccessPanel({ group, allVms }) {
@@ -275,6 +279,7 @@ function VmAccessPanel({ group, allVms }) {
         setEditTarget(v);
         setEditForm({
             vm_id: v.vm_id, host_name: v.host_name,
+            access: v.access || 'full',
             auth_mode: v.auth_mode || 'mandiri',
             os_type: v.os_type || 'linux',
             guac_protocol: v.guac_protocol || '',
@@ -302,6 +307,15 @@ function VmAccessPanel({ group, allVms }) {
     };
 
     const authBadge = (v) => {
+        if (v.access === 'web') {
+            return (
+                <span style={{ fontSize: 10, color: 'var(--cyan)', fontFamily: 'var(--fmono)',
+                    background: 'var(--cyan)18', border: '1px solid var(--cyan)33',
+                    borderRadius: 4, padding: '1px 5px' }}>
+                    {t('groups.badgeWeb')}
+                </span>
+            );
+        }
         if (v.auth_mode === 'credentials') {
             return (
                 <span style={{ fontSize: 10, color: 'var(--purple)', fontFamily: 'var(--fmono)',

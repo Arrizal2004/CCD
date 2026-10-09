@@ -58,7 +58,7 @@ async def terminal_linux(
         if not vm_id_clean:
             await websocket.close(code=4403)
             return
-        allowed = await get_student_vm_ids(int(user["sub"]), host_name)
+        allowed = await get_student_vm_ids(int(user["sub"]), host_name, full_only=True)
         if (vm_id_clean, host_name) not in allowed:
             await websocket.close(code=4403)
             return
@@ -212,7 +212,7 @@ async def terminal_windows(
         if not vm_id_clean:
             await websocket.close(code=4403)
             return
-        allowed = await get_student_vm_ids(int(user["sub"]), host_name)
+        allowed = await get_student_vm_ids(int(user["sub"]), host_name, full_only=True)
         if (vm_id_clean, host_name) not in allowed:
             await websocket.close(code=4403)
             return

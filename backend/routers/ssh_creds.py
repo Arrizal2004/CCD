@@ -11,7 +11,7 @@ from auth import get_current_user, require_sysadmin, Role
 from database import get_pool
 from services.ssh_client import encrypt_secret, decrypt_secret, SshClient
 from services.vm_credentials import save_vm_credentials
-from services import guest_accounts
+from services import guest_accounts, vm_access
 from services.guac_sync import (
     sync_vm_connection, delete_vm_connection, grant_vm_to_all_admins,
     sync_os_account_connection, delete_os_account_connection,
@@ -677,11 +677,7 @@ async def get_guac_url(host_name: str, vm_id: str, user: dict = Depends(get_curr
 
     # RBAC: student hanya boleh connect VM yang bisa diakses (direct assignment ATAU via group)
     if user["role"] == Role.STUDENT:
-        from database import get_student_vm_ids
-        allowed = await get_student_vm_ids(int(user["sub"]), host_name)
-        if (vm_id, host_name) not in allowed:
-            raise HTTPException(403, tr("Anda tidak punya akses ke VM ini",
-                                        "You do not have access to this VM"))
+        await vm_access.require_full_access(int(user["sub"]), vm_id, host_name)
         await _ensure_ip(host_name, vm_id)
 
         # Coba ambil OS account dari direct assignment (opsional — bisa None untuk group access)
@@ -806,10 +802,7 @@ async def get_my_vm_cred(host_name: str, vm_id: str, user: dict = Depends(get_cu
     - Jika assignment default cred / bukan student → return vm_username + vm_password dari vm_metadata
     """
     if user["role"] == Role.STUDENT:
-        from database import get_student_vm_ids
-        if (vm_id, host_name) not in await get_student_vm_ids(int(user["sub"]), host_name):
-            raise HTTPException(403, tr("Anda tidak punya akses ke VM ini",
-                                        "You do not have access to this VM"))
+        await vm_access.require_full_access(int(user["sub"]), vm_id, host_name)
     pool = await get_pool()
     async with pool.acquire() as conn:
         # Cek direct assignment untuk ambil OS account (opsional — group access tidak punya OS account)

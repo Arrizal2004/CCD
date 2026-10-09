@@ -73,6 +73,7 @@ class AssignVmRequest(BaseModel):
     host_name:     str
     vm_name:       Optional[str] = None
     os_account_id: Optional[int] = None
+    access:        str = "full"         # "full" (Connect + Open Web) | "web" (hanya Open Web)
 
 
 # ── Auth ──────────────────────────────────────────────────────
@@ -893,12 +894,18 @@ async def delete_user_endpoint(user_id: int, request: Request, current: dict = D
 @router.post("/vm-assignments")
 async def assign_vm(body: AssignVmRequest, request: Request, current: dict = Depends(require_sysadmin)):
     """Assign VM ke student, opsional dengan OS account tertentu."""
+    if body.access not in ("full", "web"):
+        raise HTTPException(400, tr("access harus 'full' atau 'web'", "access must be 'full' or 'web'"))
+    if body.access == "web" and body.os_account_id:
+        raise HTTPException(400, tr("Akses 'Hanya Open Web' tidak bisa memakai OS account",
+                                    "'Open Web only' access cannot use an OS account"))
     detail = both(lambda: tr(f"Assign VM {body.vm_id} ke user #{body.user_id}", f"Assigned VM {body.vm_id} to user #{body.user_id}")
-                  + (f" (OS account #{body.os_account_id})" if body.os_account_id else ""))
+                  + (f" (OS account #{body.os_account_id})" if body.os_account_id else "")
+                  + (tr(" (hanya Open Web)", " (Open Web only)") if body.access == "web" else ""))
     await log_activity(current, "RBAC_ASSIGN_VM", "WARNING",
                        {"id": body.vm_id, "name": body.host_name}, detail, request)
     from services.assignments import assign_vm as do_assign
-    await do_assign(body.user_id, body.vm_id, body.host_name, body.vm_name, body.os_account_id)
+    await do_assign(body.user_id, body.vm_id, body.host_name, body.vm_name, body.os_account_id, body.access)
     return {"status": "assigned"}
 
 
@@ -909,7 +916,7 @@ async def get_user_assignments(user_id: int, current: dict = Depends(require_sys
         rows = await conn.fetch(
             """SELECT va.id, va.user_id, va.vm_id, va.host_name,
                       COALESCE(va.vm_name, v.vm_name) AS vm_name,
-                      va.assigned_at, va.os_account_id,
+                      va.assigned_at, va.os_account_id, va.access,
                       voa.os_username, voa.label AS os_account_label
                FROM vm_assignments va
                LEFT JOIN vms v ON v.vm_id = va.vm_id AND v.host_name = va.host_name
@@ -956,7 +963,7 @@ async def unassign_vm(user_id: int, vm_id: str) -> bool:
                FROM vm_assignments va
                LEFT JOIN vms v ON v.vm_id = va.vm_id AND v.host_name = va.host_name
                LEFT JOIN vm_os_accounts voa ON voa.id = va.os_account_id
-               WHERE va.user_id = $1 AND va.deleted_at IS NULL""",
+               WHERE va.user_id = $1 AND va.deleted_at IS NULL AND va.access = 'full'""",
             user_id
         )
 

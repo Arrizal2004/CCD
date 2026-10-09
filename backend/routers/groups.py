@@ -20,12 +20,13 @@ Endpoint:
   DELETE /{id}/vms                cabut akses VM dari grup
 """
 
+import asyncio
 import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from auth import require_sysadmin, get_current_user
-from database import get_pool
+from database import get_pool, get_student_vm_access
 from services import guest_accounts
 from i18n import tr
 from services.audit import both, log_activity
@@ -52,6 +53,7 @@ class VmAccessBody(BaseModel):
     os_username:  Optional[str] = None        # untuk credentials mode
     os_password:  Optional[str] = None        # untuk credentials mode
     apply_in_vm:  bool          = False       # buat/perbarui akun ini di dalam VM lewat QEMU Guest Agent
+    access:       str           = "full"      # "full" (Connect + Open Web) | "web" (hanya Open Web, tanpa kredensial)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,6 +66,8 @@ async def _get_group_or_404(conn, group_id: int) -> dict:
 
 
 def _mode_text(body: VmAccessBody) -> str:
+    if body.access == "web":
+        return tr("hanya Open Web", "Open Web only")
     if body.auth_mode == "credentials":
         acc = (body.os_username or "").strip()
         return tr(f"kredensial bersama, akun OS '{acc}'", f"shared credentials, OS account '{acc}'")
@@ -214,7 +218,7 @@ async def list_group_vms(group_id: int, _: dict = Depends(require_sysadmin)):
         rows = await conn.fetch("""
             SELECT vm_id, host_name, assigned_at,
                    auth_mode, os_type, guac_protocol,
-                   os_username,
+                   os_username, access,
                    (os_password_enc IS NOT NULL) AS has_password
             FROM group_vm_access
             WHERE group_id = $1
@@ -224,6 +228,11 @@ async def list_group_vms(group_id: int, _: dict = Depends(require_sysadmin)):
 
 
 def _validate_vm_access_body(body: VmAccessBody, password_required: bool = True):
+    if body.access not in ("full", "web"):
+        raise HTTPException(400, tr("access harus 'full' atau 'web'", "access must be 'full' or 'web'"))
+    if body.access == "web":
+        # Hanya Open Web: tidak ada kredensial dan tidak ada koneksi Guacamole yang dibuat untuk grup ini.
+        body.auth_mode, body.os_username, body.os_password, body.apply_in_vm = "mandiri", None, None, False
     if body.auth_mode not in ("mandiri", "credentials"):
         raise HTTPException(400, tr("auth_mode harus 'mandiri' atau 'credentials'",
                                     "auth_mode must be 'mandiri' or 'credentials'"))
@@ -263,6 +272,26 @@ async def _apply_in_vm(body: VmAccessBody, group_id: int, user: dict, request: R
                        {"id": body.vm_id, "name": body.host_name}, both(_detail), request)
 
 
+async def _revoke_connect_for_members(group_id: int, vm_id: str, host_name: str) -> None:
+    """Akses grup ke VM ini menjadi 'Hanya Open Web': cabut koneksi Guacamole yang mungkin sudah pernah
+    diberikan ke anggota, kecuali anggota yang masih punya akses penuh lewat jalur lain."""
+    from services.guac_sync import revoke_vm_connections
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            members = await conn.fetch(
+                """SELECT u.id, u.username FROM group_members gm JOIN users u ON u.id = gm.user_id
+                   WHERE gm.group_id = $1 AND u.deleted_at IS NULL""", group_id)
+            vm_name = await conn.fetchval("SELECT vm_name FROM vms WHERE vm_id = $1 AND host_name = $2", vm_id, host_name)
+        if not vm_name:
+            return
+        for m in members:
+            if (await get_student_vm_access(m["id"], host_name)).get((vm_id, host_name)) == "web":
+                await revoke_vm_connections(m["username"], host_name, vm_name)
+    except Exception:
+        log.warning("Mencabut koneksi anggota grup %s untuk VM %s gagal", group_id, vm_id, exc_info=True)
+
+
 @router.post("/{group_id}/vms", status_code=201)
 async def add_group_vm(group_id: int, body: VmAccessBody, request: Request, user: dict = Depends(require_sysadmin)):
     _validate_vm_access_body(body)
@@ -284,11 +313,11 @@ async def add_group_vm(group_id: int, body: VmAccessBody, request: Request, user
         try:
             row = await conn.fetchrow(
                 """INSERT INTO group_vm_access
-                       (group_id, vm_id, host_name, auth_mode, os_username, os_password_enc, os_type, guac_protocol)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-                   RETURNING vm_id, host_name, assigned_at, auth_mode, os_type, guac_protocol, os_username""",
+                       (group_id, vm_id, host_name, auth_mode, os_username, os_password_enc, os_type, guac_protocol, access)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                   RETURNING vm_id, host_name, assigned_at, auth_mode, os_type, guac_protocol, os_username, access""",
                 group_id, body.vm_id, body.host_name,
-                body.auth_mode, (body.os_username or "").strip() or None, password_enc, body.os_type, protocol
+                body.auth_mode, (body.os_username or "").strip() or None, password_enc, body.os_type, protocol, body.access
             )
         except Exception:
             raise HTTPException(status_code=409, detail=tr("VM sudah memiliki akses ke grup ini",
@@ -298,6 +327,8 @@ async def add_group_vm(group_id: int, body: VmAccessBody, request: Request, user
                                        f"{body.host_name} ({_mode_text(body)})",
                                        f"{user.get('username')} gave the group '{group['name']}' access to VM {body.vm_id} on "
                                        f"{body.host_name} ({_mode_text(body)})")), request)
+    if body.access == "web":
+        asyncio.create_task(_revoke_connect_for_members(group_id, body.vm_id, body.host_name))
     return dict(row)
 
 
@@ -330,14 +361,15 @@ async def update_group_vm_access(group_id: int, body: VmAccessBody, request: Req
     async with pool.acquire() as conn:
         result = await conn.fetchrow(
             """UPDATE group_vm_access
-               SET auth_mode=$4, os_username=$5, os_password_enc=COALESCE($6, os_password_enc),
-                   os_type=$7, guac_protocol=$8
+               SET auth_mode=$4, os_username=$5,
+                   os_password_enc=CASE WHEN $9 = 'web' THEN NULL ELSE COALESCE($6, os_password_enc) END,
+                   os_type=$7, guac_protocol=$8, access=$9
                WHERE group_id=$1 AND vm_id=$2 AND host_name=$3
-               RETURNING vm_id, host_name, auth_mode, os_type, guac_protocol, os_username""",
+               RETURNING vm_id, host_name, auth_mode, os_type, guac_protocol, os_username, access""",
             group_id, body.vm_id, body.host_name,
             body.auth_mode,
             body.os_username.strip() if body.auth_mode == "credentials" else None,
-            password_enc, body.os_type, protocol
+            password_enc, body.os_type, protocol, body.access
         )
         if not result:
             raise HTTPException(404, tr("Akses VM tidak ditemukan di grup ini",
@@ -348,6 +380,8 @@ async def update_group_vm_access(group_id: int, body: VmAccessBody, request: Req
                                        f"{user.get('username')} changed the access of the group '{group['name']}' to VM {body.vm_id} on "
                                        f"{body.host_name} ({_mode_text(body)}{', password changed' if body.os_password else ''})")),
                        request)
+    if body.access == "web":
+        asyncio.create_task(_revoke_connect_for_members(group_id, body.vm_id, body.host_name))
     return dict(result)
 
 

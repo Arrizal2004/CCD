@@ -141,8 +141,8 @@ export const dismissPasswordHelp = (id)  => api.post(`/api/v1/users/password-hel
 export const requestPasswordHelp = (username, message) =>
     axios.post(`${BASE}/api/v1/users/password-help`, { username, message }).then(r => r.data);
 export const fetchUserAssignments = (user_id) => api.get(`/api/v1/users/${user_id}/vm-assignments`).then(r => r.data);
-export const assignVm = (user_id, vm_id, host_name, os_account_id = null, vm_name = null) =>
-    api.post('/api/v1/users/vm-assignments', { user_id, vm_id, host_name, vm_name, os_account_id }).then(r => r.data);
+export const assignVm = (user_id, vm_id, host_name, os_account_id = null, vm_name = null, access = 'full') =>
+    api.post('/api/v1/users/vm-assignments', { user_id, vm_id, host_name, vm_name, os_account_id, access }).then(r => r.data);
 export const fetchVmOsAccounts = (host_name, vm_id) =>
     api.get(`/api/v1/ssh-creds/vm-os-accounts/${host_name}/${encodeURIComponent(vm_id)}`).then(r => r.data);
 // create_in_vm / remove_in_vm menjalankan perintah lewat QEMU Guest Agent, jadi pakai timeout agent.

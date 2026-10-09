@@ -670,34 +670,49 @@ async def init_db():
     log.info("Tables ready")
 
 
-async def get_student_vm_ids(user_id: int, host_name: str = None) -> set:
+async def get_student_vm_access(user_id: int, host_name: str = None) -> dict:
     """
-    Return set of (vm_id, host_name) yang boleh diakses student ini.
-    Menggabungkan direct vm_assignments + akses via group_vm_access.
+    {(vm_id, host_name): 'full' | 'web'} untuk VM yang boleh diakses student ini.
+    Menggabungkan direct vm_assignments + akses via group_vm_access. 'full' = Connect dan Open Web,
+    'web' = hanya lihat, Open Web, dan Helpdesk. Bila sebuah VM terdaftar lewat beberapa jalur,
+    jalur 'full' yang menang.
     """
     pool = await get_pool()
     async with pool.acquire() as conn:
         if host_name:
             rows = await conn.fetch("""
-                SELECT vm_id, host_name FROM vm_assignments
+                SELECT vm_id, host_name, access FROM vm_assignments
                 WHERE user_id = $1 AND host_name = $2 AND deleted_at IS NULL
-                UNION
-                SELECT gva.vm_id, gva.host_name
+                UNION ALL
+                SELECT gva.vm_id, gva.host_name, gva.access
                 FROM group_members gm
                 JOIN group_vm_access gva ON gva.group_id = gm.group_id
                 WHERE gm.user_id = $1 AND gva.host_name = $2
             """, user_id, host_name)
         else:
             rows = await conn.fetch("""
-                SELECT vm_id, host_name FROM vm_assignments
+                SELECT vm_id, host_name, access FROM vm_assignments
                 WHERE user_id = $1 AND deleted_at IS NULL
-                UNION
-                SELECT gva.vm_id, gva.host_name
+                UNION ALL
+                SELECT gva.vm_id, gva.host_name, gva.access
                 FROM group_members gm
                 JOIN group_vm_access gva ON gva.group_id = gm.group_id
                 WHERE gm.user_id = $1
             """, user_id)
-    return {(r["vm_id"], r["host_name"]) for r in rows}
+    levels: dict = {}
+    for r in rows:
+        key = (r["vm_id"], r["host_name"])
+        levels[key] = "full" if r["access"] == "full" else levels.get(key, "web")
+    return levels
+
+
+async def get_student_vm_ids(user_id: int, host_name: str = None, full_only: bool = False) -> set:
+    """
+    Return set of (vm_id, host_name) yang boleh diakses student ini.
+    full_only=True hanya VM yang boleh di-Connect (tanpa yang 'Hanya Open Web').
+    """
+    levels = await get_student_vm_access(user_id, host_name)
+    return {k for k, level in levels.items() if level == "full" or not full_only}
 
 
 async def cleanup_old_metrics():

@@ -29,6 +29,8 @@ export default {
     'servers.resize': ['Resize', 'Resize'],
     'servers.snapshots': ['Snapshot', 'Snapshots'],
     'servers.connect': ['Connect', 'Connect'],
+    'servers.openWeb': ['Open Web', 'Open Web'],
+    'servers.openWebHint': ['VM ini hanya bisa dibuka lewat web. Buka halaman web di VM ini', 'This VM is available through the web only. Open the web page on this VM'],
     'servers.ssh': ['SSH', 'SSH'],
     'servers.sshHint': ['Perintah SSH lewat bastion', 'SSH command through the bastion'],
     'servers.heading': ['Proxmox VE', 'Proxmox VE'],

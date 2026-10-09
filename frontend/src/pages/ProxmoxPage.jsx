@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     fetchProxmoxInstances, fetchProxmoxNodes, fetchProxmoxVms, fetchMyProxmoxVms, proxmoxVmAction,
     getGuacUrl, appendGuacToken, applyGuacTouchInputDefault, fetchSshConfig, fetchProxmoxVmIp, fetchMyAssignedVmids, fetchProxmoxVmDetail,
@@ -51,6 +52,7 @@ const ACTIONS_BY_STATUS = {
 };
 
 export default function ProxmoxPage({ currentUser }) {
+    const navigate = useNavigate();
     const [instances, setInstances] = useState([]);
     const [selectedInstance, setSelectedInstance] = useState(null);
     const [showInstances, setShowInstances] = useState(false);
@@ -176,7 +178,14 @@ export default function ProxmoxPage({ currentUser }) {
     // VMID hanya unik di dalam satu Proxmox. Daftar VM mahasiswa menggabungkan beberapa host, jadi
     // setiap VM dikenali dari host + VMID, bukan VMID saja.
     const vmKey = (vm) => { const c = ctx(vm); return `${c.instance}__${c.node}__${vm.vmid}`; };
-    const canControlVm = (vm) => canControl || myVmKeys.includes(vmKey(vm));
+    // Akses 'Hanya Open Web': mahasiswa hanya melihat status dan membuka web, tanpa power, snapshot, dan Connect.
+    const isWebOnly = (vm) => !canControl && vm.access === 'web';
+    const canControlVm = (vm) => canControl || (myVmKeys.includes(vmKey(vm)) && !isWebOnly(vm));
+    const openWeb = (vm) => {
+        const ip = vm.manual_ip || vm.ip;
+        if (ip) { try { localStorage.setItem('ccd-openweb-url', `http://${ip}`); } catch { /* storage tidak tersedia */ } }
+        navigate('/openweb');
+    };
 
     // Mahasiswa melihat CCDID (unik di seluruh dashboard), bukan VMID yang bisa kembar antar-Proxmox.
     // Admin melihat keduanya.
@@ -263,7 +272,13 @@ export default function ProxmoxPage({ currentUser }) {
                         {t('servers.snapshots')}
                     </button>
                 )}
-                {vm.status === 'running' && (
+                {isWebOnly(vm) && vm.status === 'running' && (vm.manual_ip || vm.ip) && (
+                    <button onClick={() => openWeb(vm)} title={t('servers.openWebHint')}
+                        style={{ ...btnSize, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--cyan)', color: 'var(--cyan)' }}>
+                        {t('servers.openWeb')}
+                    </button>
+                )}
+                {vm.status === 'running' && !isWebOnly(vm) && (
                     <button disabled={connecting === key} onClick={() => doConnect(vm)}
                         style={{ ...btnSize, borderRadius: 5, cursor: connecting === key ? 'wait' : 'pointer', background: 'transparent', border: '1px solid var(--cyan)', color: 'var(--cyan)', opacity: connecting === key ? 0.5 : 1 }}>
                         {connecting === key ? '…' : t('servers.connect')}
@@ -275,7 +290,7 @@ export default function ProxmoxPage({ currentUser }) {
                         SSH
                     </button>
                 )}
-                {!canControlVm(vm) && vm.status !== 'running' && <span style={{ color: 'var(--text3)' }}>—</span>}
+                {!canControlVm(vm) && (vm.status !== 'running' || (isWebOnly(vm) && !(vm.manual_ip || vm.ip))) && <span style={{ color: 'var(--text3)' }}>—</span>}
             </div>
         );
     };

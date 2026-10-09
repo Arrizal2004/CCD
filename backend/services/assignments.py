@@ -12,8 +12,12 @@ from services.ssh_client import decrypt_secret
 
 
 async def assign_vm(user_id: int, vm_id: str, host_name: str, vm_name: str | None = None,
-                    os_account_id: int | None = None) -> bool:
-    """False kalau user tidak ada. Assignment yang sudah ada diperbarui, bukan diduplikasi."""
+                    os_account_id: int | None = None, access: str = "full") -> bool:
+    """False kalau user tidak ada. Assignment yang sudah ada diperbarui, bukan diduplikasi.
+    access='web' (hanya Open Web) tidak membawa OS account dan tidak diberi koneksi Guacamole: koneksi
+    yang sudah ada dicabut oleh sinkronisasi di bawah."""
+    if access == "web":
+        os_account_id = None
     pool = await get_pool()
     async with pool.acquire() as conn:
         if not vm_name:
@@ -22,11 +26,11 @@ async def assign_vm(user_id: int, vm_id: str, host_name: str, vm_name: str | Non
         if not username:
             return False
         await conn.execute(
-            """INSERT INTO vm_assignments (user_id, vm_id, host_name, vm_name, os_account_id)
-               VALUES ($1, $2, $3, $4, $5)
+            """INSERT INTO vm_assignments (user_id, vm_id, host_name, vm_name, os_account_id, access)
+               VALUES ($1, $2, $3, $4, $5, $6)
                ON CONFLICT (user_id, vm_id, host_name) WHERE deleted_at IS NULL DO UPDATE
-               SET vm_name = COALESCE($4, vm_assignments.vm_name), os_account_id = $5""",
-            user_id, vm_id, host_name, vm_name, os_account_id)
+               SET vm_name = COALESCE($4, vm_assignments.vm_name), os_account_id = $5, access = $6""",
+            user_id, vm_id, host_name, vm_name, os_account_id, access)
         if os_account_id:
             os_acc = await conn.fetchrow(
                 """SELECT voa.*, v.vm_name
@@ -40,7 +44,8 @@ async def assign_vm(user_id: int, vm_id: str, host_name: str, vm_name: str | Non
                 """SELECT va.vm_id, COALESCE(va.vm_name, v.vm_name) AS vm_name
                    FROM vm_assignments va
                    LEFT JOIN vms v ON v.vm_id = va.vm_id AND v.host_name = va.host_name
-                   WHERE va.user_id = $1 AND va.host_name = $2 AND va.deleted_at IS NULL""",
+                   WHERE va.user_id = $1 AND va.host_name = $2 AND va.deleted_at IS NULL
+                     AND va.access = 'full'""",
                 user_id, host_name)
 
     if os_acc and os_acc["vm_name"]:
