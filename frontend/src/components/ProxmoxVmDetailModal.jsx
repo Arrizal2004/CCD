@@ -111,7 +111,7 @@ function LeaseBar({ lease, isAdmin, busy, date, setDate, onChange, onRequest }) 
     );
 }
 
-export default function ProxmoxVmDetailModal({ instance, node, vmid, ccdId = null, vmName = '', leaseUntil = null, maskHost = false, onClose, onDeleted, onLeaseChanged }) {
+export default function ProxmoxVmDetailModal({ instance, node, vmid, ccdId = null, vmName = '', leaseUntil = null, maskHost = false, zIndex = 200, onClose, onDeleted, onLeaseChanged }) {
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -195,7 +195,7 @@ export default function ProxmoxVmDetailModal({ instance, node, vmid, ccdId = nul
     const nics = data ? parseNics(config) : [];
 
     return (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }} onClick={onClose}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex }} onClick={onClose}>
             <div style={{ background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 10, width: 640, maxWidth: '92vw', maxHeight: '85vh', overflow: 'auto', padding: 20 }} onClick={e => e.stopPropagation()}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
                     <div>

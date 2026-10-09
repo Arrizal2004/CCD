@@ -339,8 +339,15 @@ async def get_ticket(ticket_id: int, user: dict = Depends(get_current_user)):
         t = await _get_ticket_or_403(conn, ticket_id, user)
         msgs = await conn.fetch(
             "SELECT * FROM ticket_messages WHERE ticket_id = $1 ORDER BY created_at ASC", ticket_id)
+        ticket = _ticket_row(t)
+        if _is_admin(user) and t["vm_id"] and t["host_name"]:
+            # Admin: apakah VM-nya masih ada dan kapan masa sewanya habis, untuk tombol "Buka detail VM".
+            vm = await conn.fetchrow("SELECT lease_until FROM vms WHERE vm_id = $1 AND host_name = $2",
+                                     t["vm_id"], t["host_name"])
+            ticket["vm_live"] = vm is not None
+            ticket["vm_lease_until"] = vm["lease_until"].isoformat() if vm and vm["lease_until"] else None
     return {
-        "ticket": _ticket_row(t),
+        "ticket": ticket,
         "messages": [
             {
                 "id": m["id"], "sender_id": m["sender_id"], "sender_role": m["sender_role"],

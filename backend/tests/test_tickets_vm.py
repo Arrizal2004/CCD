@@ -97,3 +97,39 @@ def test_ccd_id_of_other_vm_looks_like_unknown(client, student_token, assigned_v
     r2 = client.post("/api/tickets", headers=auth(student_token), json={"title": "x", "ccd_id": "CCD-99999"})
     assert r1.status_code == r2.status_code == 400
     assert "tidak ditemukan" in r1.json()["detail"]
+
+
+def test_admin_ticket_detail_tells_if_vm_exists_and_its_lease(client, student_token, sysadmin_token, assigned_vm):
+    _run(_vm_row(VMID, MY_HOST, "vm-saya"))
+    _run(_set_lease(VMID, MY_HOST, "2030-01-02T03:04:05+00:00"))
+    tid = _ticket(client, student_token, vm_id=VMID, host_name=MY_HOST).json()["id"]
+    admin = client.get(f"/api/tickets/{tid}", headers=auth(sysadmin_token)).json()["ticket"]
+    assert admin["vm_live"] is True and admin["vm_lease_until"].startswith("2030-01-02")
+    student = client.get(f"/api/tickets/{tid}", headers=auth(student_token)).json()["ticket"]
+    assert "vm_live" not in student and "vm_lease_until" not in student
+
+
+def test_admin_ticket_detail_marks_deleted_vm(client, student_token, sysadmin_token, assigned_vm):
+    _run(_vm_row(VMID, MY_HOST, "vm-saya"))
+    tid = _ticket(client, student_token, vm_id=VMID, host_name=MY_HOST).json()["id"]
+    _run(_drop_vm(VMID, MY_HOST))
+    admin = client.get(f"/api/tickets/{tid}", headers=auth(sysadmin_token)).json()["ticket"]
+    assert admin["vm_live"] is False and admin["vm_lease_until"] is None
+
+
+async def _set_lease(vm_id: str, host: str, until: str) -> None:
+    from datetime import datetime
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute("UPDATE vms SET lease_until = $3 WHERE vm_id = $1 AND host_name = $2",
+                           vm_id, host, datetime.fromisoformat(until))
+    finally:
+        await conn.close()
+
+
+async def _drop_vm(vm_id: str, host: str) -> None:
+    conn = await asyncpg.connect(DATABASE_URL)
+    try:
+        await conn.execute("DELETE FROM vms WHERE vm_id = $1 AND host_name = $2", vm_id, host)
+    finally:
+        await conn.close()

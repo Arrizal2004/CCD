@@ -8,6 +8,7 @@ import PaneTabs from './PaneTabs';
 import Icon from './Icons';
 import TicketCategoriesModal from './TicketCategoriesModal';
 import DeleteRecord from './DeleteRecord';
+import ProxmoxVmDetailModal from './ProxmoxVmDetailModal';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const WS_BASE  = API_BASE
@@ -389,6 +390,7 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
     const fileInputRef = useRef(null);
     const isMobile = useIsMobile();
     const [pane, setPane] = useState('chat');   // HP: hanya satu panel yang tampil
+    const [vmOpen, setVmOpen] = useState(false); // admin: detail VM dibuka di atas tiket
 
     const load = useCallback(async () => {
         try {
@@ -479,8 +481,12 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
     const snap = t.vm_snapshot;
     const isClosed = t.status === 'CLOSED';
     const isSuper = currentUser?.role === 'superadmin';
+    // Admin: buka detail VM dari tiket (mis. perpanjang masa sewa) tanpa keluar dari tiket.
+    const [instance, node] = (t.host_name || '').split('__');
+    const canOpenVm = isAdmin && !!t.vm_id && !!node && t.vm_live;
 
     return (
+        <>
         <Overlay onClose={onClose} fullscreen={isMobile}>
             <div style={{ width: isMobile ? '100vw' : 'min(900px,96vw)', height: isMobile ? '100dvh' : 'min(640px,92vh)', display: 'flex', flexDirection: 'column' }}>
                 <Header title={`${t.ticket_number} · ${t.title}`} onClose={onClose}
@@ -498,6 +504,13 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                         <Row k={tr('ticket.student')}>{t.student_name}</Row>
                         <Row k={tr('ticket.category')}>{categoryLabel(t.category, cats)}</Row>
                         <Row k={tr('ticket.vm')}>{vmLabel(t, isAdmin)}</Row>
+                        {canOpenVm && (
+                            <button onClick={() => setVmOpen(true)} title={tr('ticket.openVmHint')}
+                                style={{ margin: '2px 0 8px', padding: '4px 10px', borderRadius: 6, fontSize: 11, fontFamily: 'var(--fmono)', cursor: 'pointer', background: 'transparent', border: '1px solid var(--cyan)', color: 'var(--cyan)' }}>
+                                {tr('ticket.openVm')}
+                            </button>
+                        )}
+                        {isAdmin && !!t.vm_id && !t.vm_live && <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 8 }}>{tr('ticket.vmGone')}</div>}
                         <Row k={tr('ticket.created')}>{fmt(t.created_at)}</Row>
                         {t.closed_at && <Row k={tr('ticket.closed')}>{fmt(t.closed_at)}</Row>}
                         <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>{tr('ticket.description')}</div>
@@ -633,6 +646,15 @@ function TicketThread({ ticketId, currentUser, onClose, onChanged }) {
                 </div>
             </div>
         </Overlay>
+        {vmOpen && canOpenVm && (
+            <ProxmoxVmDetailModal
+                instance={instance} node={node} vmid={t.vm_id} ccdId={t.ccd_id} vmName={t.vm_snapshot?.vm_name || ''}
+                leaseUntil={t.vm_lease_until} zIndex={3100}
+                onLeaseChanged={() => load()}
+                onClose={() => setVmOpen(false)}
+                onDeleted={() => { setVmOpen(false); load(); onChanged?.(); }} />
+        )}
+        </>
     );
 }
 
