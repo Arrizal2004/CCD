@@ -613,6 +613,32 @@ def _vm_creds(row) -> dict:
     }
 
 
+async def _ensure_ip(host_name: str, vm_id: str) -> None:
+    """A VM saved without an IP (DHCP VM, e.g. from a bulk batch) gets one on first Connect: ask the QEMU
+    Guest Agent and keep the answer in vm_credentials. Does nothing when the IP is set, the VM is off, it
+    has no agent, or it isn't a Proxmox VM; Connect then reports the missing IP."""
+    from services import proxmox_instances
+    label, sep, node = host_name.partition("__")
+    if not sep or not node or not str(vm_id).isdigit():
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT ssh_host FROM vm_credentials WHERE vm_id = $1 AND host_name = $2",
+                                  vm_id, host_name)
+    if not row or row["ssh_host"]:
+        return
+    try:
+        client = await proxmox_instances.get_client(label)
+        ip = await client.get_guest_ip(node, int(vm_id))
+    except Exception:
+        return
+    if ip:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE vm_credentials SET ssh_host = $3, updated_at = NOW() "
+                "WHERE vm_id = $1 AND host_name = $2 AND COALESCE(ssh_host, '') = ''", vm_id, host_name, ip)
+
+
 async def _main_connection(host_name: str, vm_id: str, vm_name: str, guac_public: str) -> tuple:
     """(url, connection_id) of the VM's main connection, recreating it from vm_credentials when it's
     missing (e.g. credentials saved while Guacamole was refusing writes). (None, None) = no credentials."""
@@ -629,8 +655,10 @@ async def _main_connection(host_name: str, vm_id: str, vm_name: str, guac_public
         if not row:
             return None, None
         if not row["ssh_host"]:
-            raise HTTPException(409, tr("IP VM belum diisi — isi lewat 'Atur kredensial & IP' di detail VM",
-                                        "The VM IP is not set — set it with 'Set credentials & IP' in the VM details"))
+            raise HTTPException(409, tr("IP VM belum diketahui. Pastikan VM menyala dan QEMU Guest Agent aktif, "
+                                        "atau isi lewat 'Atur kredensial & IP' di detail VM",
+                                        "The VM IP is not known yet. Make sure the VM is running and the QEMU Guest Agent is active, "
+                                        "or set it with 'Set credentials & IP' in the VM details"))
         cid = await sync_vm_connection(host_name, vm_name, vm_id, _vm_creds(row))
         if not cid:
             raise HTTPException(502, tr("Guacamole menolak membuat koneksi untuk VM ini — cek log backend",
@@ -654,6 +682,7 @@ async def get_guac_url(host_name: str, vm_id: str, user: dict = Depends(get_curr
         if (vm_id, host_name) not in allowed:
             raise HTTPException(403, tr("Anda tidak punya akses ke VM ini",
                                         "You do not have access to this VM"))
+        await _ensure_ip(host_name, vm_id)
 
         # Coba ambil OS account dari direct assignment (opsional — bisa None untuk group access)
         async with pool.acquire() as conn:
@@ -752,6 +781,7 @@ async def get_guac_url(host_name: str, vm_id: str, user: dict = Depends(get_curr
         return {"url": url, "vm_name": vm_row["vm_name"]}
 
     # Admin / sysadmin: pakai koneksi utama VM
+    await _ensure_ip(host_name, vm_id)
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT vm_name FROM vms WHERE vm_id = $1 AND host_name = $2",
