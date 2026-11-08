@@ -120,6 +120,15 @@ class ProxmoxClient:
     async def cluster_vm_resources(self) -> list[dict]:
         return await self._request("GET", "/cluster/resources", params={"type": "vm"})
 
+    async def vnc_proxy(self, node: str, vmid: int) -> dict:
+        """Buka sesi VNC (websocket) untuk konsol. Return {port, ticket, user, cert}."""
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/vncproxy", data={"websocket": 1})
+
+    def vnc_websocket_url(self, node: str, vmid: int, port, ticket: str) -> str:
+        from urllib.parse import quote
+        return (f"wss://{self.host}/api2/json/nodes/{node}/qemu/{vmid}/vncwebsocket"
+                f"?port={port}&vncticket={quote(ticket, safe='')}")
+
     async def update_vm_config(self, node: str, vmid: int, config: dict) -> None:
         await self._request("PUT", f"/nodes/{node}/qemu/{vmid}/config", data=config)
 
@@ -211,6 +220,62 @@ class ProxmoxClient:
                             data={"username": username, "password": password})
 
     # ── SDN: switch yang dibuat dari dashboard (VNet + subnet di zone tipe Simple) ──────────────
+
+    # ── Cloud image: unduh, impor disk, jadikan template ─────────────────────────
+
+    async def version(self) -> dict:
+        return await self._request("GET", "/version")
+
+    # Hak yang dibutuhkan token untuk menulis ke storage menurut jenis konten.
+    _CONTENT_PRIV = {"images": "Datastore.AllocateSpace", "import": "Datastore.AllocateTemplate"}
+
+    async def _can(self, path: str, priv: str) -> bool:
+        """Apakah token punya `priv` di `path`? Gagal membaca hak dianggap boleh (Proxmox tetap menolak dengan pesan jelasnya)."""
+        try:
+            return bool((await self.permissions(path)).get(priv))
+        except ProxmoxError:
+            return True
+
+    async def list_storages(self, node: str, content: str | None = None, writable: bool = True) -> list[dict]:
+        """Storage aktif di node; `content` menyaring yang mengizinkan tipe itu. Dengan `content`, storage yang tidak boleh
+        ditulisi token ini dibuang (writable=True), karena bukan tujuan yang berguna."""
+        params = {"content": content} if content else None
+        found = await self._request("GET", f"/nodes/{node}/storage", params=params) or []
+        need = self._CONTENT_PRIV.get(content or "")
+        if not (writable and need):
+            return found
+        allowed = await asyncio.gather(*(self._can(f"/storage/{st['storage']}", need) for st in found))
+        return [st for st, ok in zip(found, allowed) if ok]
+
+    async def list_pools(self) -> list[dict]:
+        return await self._request("GET", "/pools")
+
+    async def storage_files(self, node: str, storage: str, content: str) -> list[dict]:
+        return await self._request("GET", f"/nodes/{node}/storage/{storage}/content", params={"content": content})
+
+    async def download_url(self, node: str, storage: str, url: str, filename: str, content: str = "import",
+                           checksum: str | None = None, checksum_algorithm: str | None = None) -> str:
+        """Minta node mengunduh `url` ke storage. Mengembalikan UPID task unduhannya."""
+        data = {"url": url, "filename": filename, "content": content, "verify-certificates": 1}
+        if checksum:
+            data["checksum"] = checksum
+            data["checksum-algorithm"] = checksum_algorithm or "sha256"
+        return await self._request("POST", f"/nodes/{node}/storage/{storage}/download-url", data=data)
+
+    async def delete_volume(self, node: str, storage: str, volume: str) -> str | None:
+        """`volume` = volid lengkap (storage:content/nama)."""
+        return await self._request("DELETE", f"/nodes/{node}/storage/{storage}/content/{volume}")
+
+    async def create_vm(self, node: str, config: dict) -> str:
+        """Buat VM baru dari `config` (parameter POST /nodes/{node}/qemu). Mengembalikan UPID."""
+        return await self._request("POST", f"/nodes/{node}/qemu", data=config, timeout=60.0)
+
+    async def convert_to_template(self, node: str, vmid: int) -> str | None:
+        return await self._request("POST", f"/nodes/{node}/qemu/{vmid}/template")
+
+    async def task_log(self, node: str, upid: str, limit: int = 50) -> list[str]:
+        lines = await self._request("GET", f"/nodes/{node}/tasks/{upid}/log", params={"limit": limit}) or []
+        return [str(line.get("t", "")) for line in lines]
 
     async def permissions(self, path: str) -> dict:
         """Hak token ini pada satu path ACL, mis. '/sdn/zones/ccd' → {'SDN.Allocate': 1, ...}."""

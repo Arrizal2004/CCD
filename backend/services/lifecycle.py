@@ -83,11 +83,59 @@ async def enforce_leases() -> int:
     return done
 
 
+async def warn_leases() -> int:
+    """Email peringatan ke pemilik VM beberapa hari sebelum masa sewa habis, sekali per batas sewa."""
+    from services import mailer, system_settings as ss
+    cfg = await mailer.get_config()
+    if not (cfg["smtp"]["enabled"] and cfg["notify"].get("lease")):
+        return 0
+    days = int(cfg["notify"].get("lease_days_before") or 3)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT vm_id, host_name, vm_name, ccd_id, lease_until FROM vms
+               WHERE lease_until IS NOT NULL AND lease_until > NOW() AND lease_until <= NOW() + make_interval(days => $1)
+                     AND lease_enforced_at IS NULL AND lease_warned_for IS DISTINCT FROM lease_until""", days)
+    brand = (await ss.get_settings()).get("name") or "CCD"
+    done = 0
+    for r in rows:
+        async with pool.acquire() as conn:
+            owners = await conn.fetch(
+                """SELECT u.email FROM vm_assignments a JOIN users u ON u.id = a.user_id
+                   WHERE a.vm_id = $1 AND a.host_name = $2 AND u.email IS NOT NULL AND u.email <> ''
+                         AND u.deleted_at IS NULL AND u.is_active""", r["vm_id"], r["host_name"])
+            await conn.execute("UPDATE vms SET lease_warned_for = lease_until WHERE vm_id = $1 AND host_name = $2",
+                               r["vm_id"], r["host_name"])
+        when = r["lease_until"].astimezone(ss.tzinfo()).strftime("%Y-%m-%d %H:%M")
+        name = f"{r['vm_name']} (CCD-{r['ccd_id']:04d})"
+        text, html_body = mailer.render(
+            brand, tr("Masa sewa VM segera habis", "Your VM lease ends soon"),
+            [tr(f"Masa sewa VM {name} berakhir pada {when}. Setelah itu VM dimatikan otomatis.",
+                f"The lease of VM {name} ends on {when}. The VM is then shut down automatically."),
+             tr("Perlu waktu lebih lama? Minta perpanjangan lewat Helpdesk sebelum waktunya habis.",
+                "Need more time? Ask for an extension through the Helpdesk before it ends.")],
+            mailer.dashboard_url(cfg) or None, tr("Buka dashboard", "Open the dashboard"))
+        done += await mailer.enqueue("lease", [o["email"] for o in owners],
+                                     tr(f"Masa sewa VM {name} segera habis", f"The lease of VM {name} ends soon"),
+                                     text, html_body, cfg=cfg)
+    return done
+
+
+async def run_schedules() -> int:
+    from services import vm_schedule
+    return await vm_schedule.run_due()
+
+
+async def run_exams() -> int:
+    from services import exam_mode
+    return await exam_mode.tick()
+
+
 async def run_lifecycle_job() -> None:
     log.info("Lifecycle job started (tiap %ss)", INTERVAL_SECONDS)
     while True:
         await asyncio.sleep(INTERVAL_SECONDS)
-        for job in (expire_accounts, enforce_leases):
+        for job in (expire_accounts, enforce_leases, warn_leases, run_schedules, run_exams):
             try:
                 await job()
             except asyncio.CancelledError:

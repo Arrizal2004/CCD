@@ -43,7 +43,7 @@ from pydantic import BaseModel, Field
 
 from auth import get_current_user, Role
 from database import get_pool, get_student_vm_access
-from services import vm_access, scope
+from services import vm_access, scope, vm_lock
 from services import proxmox_instances as pve_instances
 from services.proxmox_client import ProxmoxError
 from services.audit import both, log_activity
@@ -83,6 +83,9 @@ async def _require_admin_or_assigned(user: dict, host_key: str, vmid: int, full:
         raise vm_access.no_access_error()
     if full and level != "full":
         raise vm_access.web_only_error()
+    if full:
+        from services import exam_mode            # ujian berjalan: mahasiswa tidak boleh mengubah VM
+        await exam_mode.deny_if_exam(user)
 
 
 def _host_key(label: str, node: str) -> str:
@@ -129,15 +132,20 @@ async def _sync_vms_table(host_key: str, vms: list[dict]):
     async with pool.acquire() as conn:
         for vm in vms:
             args = (str(vm["vmid"]), host_key, vm.get("name") or str(vm["vmid"]), vm.get("status"))
+            # Sumber daya untuk kuota (services/quotas.py); daftar VM Proxmox memuat maxcpu/maxmem/maxdisk dalam byte.
+            res = (vm.get("maxcpu"), round(vm["maxmem"] / 1048576) if vm.get("maxmem") else None,
+                   round(vm["maxdisk"] / 1073741824) if vm.get("maxdisk") else None)
             # UPDATE dulu, INSERT hanya untuk VM baru. INSERT ... ON CONFLICT tetap mengambil nomor
             # dari sequence CCDID setiap dipanggil, sehingga nomor VM baru akan melompat jauh.
             done = await conn.execute(
-                "UPDATE vms SET vm_name = $3, state = $4, updated_at = NOW() WHERE vm_id = $1 AND host_name = $2",
-                *args)
+                """UPDATE vms SET vm_name = $3, state = $4, updated_at = NOW(),
+                          cores = COALESCE($5, cores), memory_mb = COALESCE($6, memory_mb), disk_gb = COALESCE($7, disk_gb)
+                   WHERE vm_id = $1 AND host_name = $2""",
+                *args, *res)
             if done == "UPDATE 0":
                 await conn.execute(
-                    """INSERT INTO vms (vm_id, host_name, vm_name, state, updated_at)
-                       VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (vm_id, host_name) DO NOTHING""", *args)
+                    """INSERT INTO vms (vm_id, host_name, vm_name, state, updated_at, cores, memory_mb, disk_gb)
+                       VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7) ON CONFLICT (vm_id, host_name) DO NOTHING""", *args, *res)
 
 
 async def _my_instances(user: dict) -> list[dict]:
@@ -415,8 +423,21 @@ async def _node_vms(label: str, node: str, user: dict) -> list[dict]:
         vms = [vm for vm in vms if str(vm["vmid"]) in visible]
     running = [vm["vmid"] for vm in vms if vm.get("status") == "running" and str(vm["vmid"]) in visible]
     agent = await _agent_ips(client, label, node, running)
+    is_admin = user.get("role") in _ADMIN_ROLES
+    locks = await vm_lock.flags(client, label, node, [vm["vmid"] for vm in vms]) if is_admin else {}
+    scheduled, baselined = set(), set()
+    if is_admin:
+        from services import lab_reset
+        baselined = await lab_reset.baselines(host_key)
+        async with pool.acquire() as conn:
+            scheduled = {r["vm_id"] for r in await conn.fetch(
+                "SELECT DISTINCT vm_id FROM vm_schedules WHERE host_name = $1 AND enabled", host_key)}
     for vm in vms:
         vid = str(vm["vmid"])
+        if is_admin:
+            vm["locked"] = locks.get(vid)        # None = config tidak terbaca
+            vm["scheduled"] = vid in scheduled
+            vm["baseline"] = vid in baselined
         meta = vm_rows.get(vid)
         vm["ccd_id"] = meta["ccd_id"] if meta else None   # nomor unik lintas Proxmox (migrations/V006)
         vm["lease_until"] = meta["lease_until"].isoformat() if meta and meta["lease_until"] else None
@@ -853,7 +874,7 @@ async def create_vm(label: str, node: str, body: CreateVmRequest, request: Reque
 
 
 async def create_vm_core(label: str, node: str, body: CreateVmRequest, user: dict, request: Request | None = None,
-                         wait_for_agent: bool = True) -> dict:
+                         wait_for_agent: bool = True, progress=None) -> dict:
     """Clone template + cloud-init, catat VM di dashboard, dan simpan kredensial Connect. Dipakai form
     Create VM dan pembuatan VM massal (services/vm_batches.py). Kesalahan dikembalikan sebagai HTTPException.
     wait_for_agent=False melewati penantian IP dari guest agent kalau IP-nya statis (VM massal)."""
@@ -881,7 +902,7 @@ async def create_vm_core(label: str, node: str, body: CreateVmRequest, user: dic
             username=body.username.strip(), password=body.password, ip_mode=body.ip_mode,
             ip_cidr=ip_cidr, gateway=gateway, dns=dns, cores=body.cores,
             memory_mb=body.memory_mb, disk_gb=body.disk_gb, bridge=bridge,
-            full_clone=body.full_clone, start=body.start)
+            full_clone=body.full_clone, start=body.start, progress=progress)
     except provision.ProvisionError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except ProxmoxError as e:
@@ -903,9 +924,13 @@ async def create_vm_core(label: str, node: str, body: CreateVmRequest, user: dic
                 "UPDATE vms SET lease_until = NOW() + make_interval(days => $3) WHERE vm_id = $1 AND host_name = $2",
                 str(vm["vmid"]), host_key, body.lease_days)
     need_agent = vm["started"] and (wait_for_agent or not vm["static_ip"])
+    if progress and need_agent:
+        await progress("agent")
     agent_ip = await provision.wait_for_agent_ip(client, node, vm["vmid"]) if need_agent else None
     ssh_host = vm["static_ip"] or agent_ip or ""
     linux = vm["os_type"] == "linux"
+    if progress:
+        await progress("credentials")
     await save_vm_credentials(
         host_key, str(vm["vmid"]), os_type=vm["os_type"], cred_type="ssh",
         guac_protocol="ssh" if linux else "rdp", ssh_host=ssh_host, ssh_port=22 if linux else 3389,
@@ -977,6 +1002,14 @@ async def delete_vm(label: str, node: str, vmid: int, confirm_name: str, request
     _require_admin(user)
     client = await _get_client(label)
     host_key = _host_key(label, node)
+    # VM terkunci ditolak sebelum apa pun.
+    try:
+        locked = vm_lock.is_protected(await client.get_vm_config(node, vmid))
+    except Exception:
+        locked = False                          # config tidak terbaca: Proxmox sendiri tetap menolak VM terkunci
+    if locked:
+        from routers.vm_ops import locked_error
+        raise locked_error()
     pool = await get_pool()
     async with pool.acquire() as conn:
         known_name = await conn.fetchval("SELECT vm_name FROM vms WHERE vm_id = $1 AND host_name = $2", str(vmid), host_key)

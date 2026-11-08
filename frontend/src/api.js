@@ -521,3 +521,78 @@ export const fetchVmBatches     = ()     => api.get(batchBase).then(r => r.data)
 export const fetchVmBatch       = (id)   => api.get(`${batchBase}/${id}`).then(r => r.data);
 export const retryVmBatch       = (id)   => apiAgent.post(`${batchBase}/${id}/retry`).then(r => r.data);
 export const downloadVmBatchCsv = (id)   => api.get(`${batchBase}/${id}/credentials.csv`, { responseType: 'blob' }).then(r => r.data);
+
+
+// 2FA (TOTP)
+export const fetchMyMfa        = ()     => api.get('/api/v1/users/me/mfa').then(r => r.data);
+export const setupMyMfa        = ()     => api.post('/api/v1/users/me/mfa/setup').then(r => r.data);
+export const enableMyMfa       = (code) => api.post('/api/v1/users/me/mfa/enable', { code }).then(r => r.data);
+export const disableMyMfa      = (code, password) => api.post('/api/v1/users/me/mfa/disable', { code, password }).then(r => r.data);
+export const newMfaRecoveryCodes = (code) => api.post('/api/v1/users/me/mfa/recovery-codes', { code }).then(r => r.data);
+export const resetUserMfa      = (id)   => api.post(`/api/v1/users/${id}/mfa/reset`).then(r => r.data);
+export const fetchMfaPolicy    = ()     => api.get('/api/v1/users/mfa-policy').then(r => r.data);
+export const saveMfaPolicy     = (required) => api.put('/api/v1/users/mfa-policy', { required }).then(r => r.data);
+
+// Email (SMTP) dan reset password lewat tautan
+export const fetchEmailSettings = () => api.get('/api/v1/system/email').then(r => r.data);
+export const saveEmailSettings  = (body) => api.put('/api/v1/system/email', body).then(r => r.data);
+export const sendTestEmail      = (to) => api.post('/api/v1/system/email/test', { to }).then(r => r.data);
+export const fetchEmailOutbox   = () => api.get('/api/v1/system/email/outbox').then(r => r.data);
+export const fetchSelfResetAvailable = () => axios.get(`${BASE}/api/v1/users/password-reset`).then(r => r.data);
+export const requestPasswordReset = (identifier) => axios.post(`${BASE}/api/v1/users/password-reset/request`, { identifier }).then(r => r.data);
+export const verifyResetToken   = (token) => axios.post(`${BASE}/api/v1/users/password-reset/verify`, { token }).then(r => r.data);
+export const confirmPasswordReset = (token, password) => axios.post(`${BASE}/api/v1/users/password-reset/confirm`, { token, password }).then(r => r.data);
+
+// Jadwal VM dan kunci VM
+const vmUrl = (instance, node, vmid) => `/api/v1/proxmox/instances/${encodeURIComponent(instance)}/nodes/${encodeURIComponent(node)}/vms/${vmid}`;
+export const fetchVmSchedules = (instance, node, vmid) => api.get(`${vmUrl(instance, node, vmid)}/schedules`).then(r => r.data);
+export const createVmSchedule = (instance, node, vmid, body) => api.post(`${vmUrl(instance, node, vmid)}/schedules`, body).then(r => r.data);
+export const updateVmSchedule = (instance, node, vmid, id, body) => api.put(`${vmUrl(instance, node, vmid)}/schedules/${id}`, body).then(r => r.data);
+export const deleteVmSchedule = (instance, node, vmid, id) => api.delete(`${vmUrl(instance, node, vmid)}/schedules/${id}`).then(r => r.data);
+export const setVmLock = (instance, node, vmid, locked) => api.put(`${vmUrl(instance, node, vmid)}/protection`, { locked }).then(r => r.data);
+
+// Proses pembuatan VM (latar belakang), konsol VM, dan kuota
+export const createVmJob   = (body) => api.post('/api/v1/vm-jobs', body).then(r => r.data);
+export const fetchVmJobs   = () => api.get('/api/v1/vm-jobs').then(r => r.data);
+export const retryVmJob    = (id) => api.post(`/api/v1/vm-jobs/${id}/retry`).then(r => r.data);
+export const deleteVmJob   = (id) => api.delete(`/api/v1/vm-jobs/${id}`).then(r => r.data);
+export const openVmConsole = (instance, node, vmid) => api.post(`${vmUrl(instance, node, vmid)}/console`).then(r => r.data);
+export const consoleWsUrl  = (session) =>
+    `${WS_BASE || (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host}/ws/console/${encodeURIComponent(session)}?token=${encodeURIComponent(localStorage.getItem('hv_token') || '')}`;
+export const fetchMyQuota       = () => api.get('/api/v1/quotas/me').then(r => r.data);
+export const fetchQuotaDefaults = () => api.get('/api/v1/quotas/defaults').then(r => r.data);
+export const saveQuotaDefaults  = (body) => api.put('/api/v1/quotas/defaults', body).then(r => r.data);
+export const fetchUserQuota     = (id) => api.get(`/api/v1/quotas/users/${id}`).then(r => r.data);
+export const saveUserQuota      = (id, body) => api.put(`/api/v1/quotas/users/${id}`, body).then(r => r.data);
+export const fetchGroupQuota    = (id) => api.get(`/api/v1/quotas/groups/${id}`).then(r => r.data);
+export const saveGroupQuota     = (id, body) => api.put(`/api/v1/quotas/groups/${id}`, body).then(r => r.data);
+
+// Template dari cloud image
+export const fetchImageCatalog = () => api.get('/api/v1/images/catalog').then(r => r.data);
+export const fetchImageOptions = (instance, node) => api.get('/api/v1/images/options', { params: { instance, node } }).then(r => r.data);
+export const startImageJob     = (body) => api.post('/api/v1/images/jobs', body).then(r => r.data);
+export const fetchImageJobs    = () => api.get('/api/v1/images/jobs').then(r => r.data);
+export const retryImageJob     = (id) => api.post(`/api/v1/images/jobs/${id}/retry`).then(r => r.data);
+export const deleteImageJob    = (id) => api.delete(`/api/v1/images/jobs/${id}`).then(r => r.data);
+
+// Reset lab, mode ujian, dan laporan pemakaian kelas
+export const fetchLabSettings   = () => api.get('/api/v1/lab/settings').then(r => r.data);
+export const saveLabSettings    = (body) => api.put('/api/v1/lab/settings', body).then(r => r.data);
+export const fetchGroupLabVms   = (gid) => api.get(`/api/v1/lab/groups/${gid}/vms`).then(r => r.data);
+export const startGroupReset    = (gid, start = true) => api.post(`/api/v1/lab/groups/${gid}/reset`, { start }).then(r => r.data);
+export const fetchLabReset      = (id) => api.get(`/api/v1/lab/resets/${id}`).then(r => r.data);
+export const fetchExams         = (gid) => api.get('/api/v1/lab/exams', { params: { group_id: gid } }).then(r => r.data);
+export const createExam         = (body) => api.post('/api/v1/lab/exams', body).then(r => r.data);
+export const startExamNow       = (id) => api.post(`/api/v1/lab/exams/${id}/start-now`).then(r => r.data);
+export const endExamNow         = (id) => api.post(`/api/v1/lab/exams/${id}/end-now`).then(r => r.data);
+export const cancelExam         = (id) => api.post(`/api/v1/lab/exams/${id}/cancel`).then(r => r.data);
+export const deleteExam         = (id) => api.delete(`/api/v1/lab/exams/${id}`).then(r => r.data);
+export const fetchMyExam        = () => api.get('/api/v1/lab/my-exam').then(r => r.data);
+export const fetchUsageReport   = (gid, from, to) => api.get(`/api/v1/lab/groups/${gid}/usage-report`, { params: { from, to } }).then(r => r.data);
+export const fetchUsageReportCsv = (gid, from, to) =>
+    api.get(`/api/v1/lab/groups/${gid}/usage-report`, { params: { from, to, format: 'csv' }, responseType: 'blob' }).then(r => ({
+        blob: r.data, filename: /filename="([^"]+)"/.exec(r.headers['content-disposition'] || '')?.[1] || `pemakaian-kelas-${gid}.csv`,
+    }));
+export const setVmBaseline      = (instance, node, vmid) => api.put(`${vmUrl(instance, node, vmid)}/baseline`).then(r => r.data);
+export const removeVmBaseline   = (instance, node, vmid) => api.delete(`${vmUrl(instance, node, vmid)}/baseline`).then(r => r.data);
+export const resetVmLab         = (instance, node, vmid, start = true) => apiLong.post(`${vmUrl(instance, node, vmid)}/reset-lab`, { start }).then(r => r.data);

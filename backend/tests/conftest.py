@@ -131,3 +131,40 @@ def _sysadmin_not_scoped(request, monkeypatch):
         return
     from services import scope
     monkeypatch.setattr(scope, "is_scoped", lambda user: False)
+
+
+@pytest.fixture
+def pve(monkeypatch):
+    """Proxmox tiruan (tests/fake_pve.py) untuk label apa pun."""
+    from services import proxmox_instances
+    from tests.fake_pve import FakePve
+    fake = FakePve()
+
+    async def get_client(label):
+        return fake
+
+    monkeypatch.setattr(proxmox_instances, "get_client", get_client)
+    return fake
+
+
+@pytest.fixture
+def image_pve(monkeypatch):
+    """Proxmox tiruan lengkap untuk cloud image (tests/fake_pve.FakeImagePve), checksum tidak diambil dari internet."""
+    from services import cloud_images, proxmox_instances
+    from tests.fake_pve import FakeImagePve
+    fake = FakeImagePve()
+
+    async def get_client(label):
+        return fake
+
+    async def resolve_checksum(image):
+        return "a" * 64, "sha256"
+
+    async def head_size(url):
+        return 600 << 20
+
+    monkeypatch.setattr(proxmox_instances, "get_client", get_client)
+    monkeypatch.setattr(cloud_images, "resolve_checksum", resolve_checksum)
+    monkeypatch.setattr(cloud_images, "_head_size", head_size)
+    monkeypatch.setattr(cloud_images, "POLL_S", 0.01)
+    return fake

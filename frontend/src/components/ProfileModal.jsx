@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { changePassword, fetchSshConfig } from '../api';
+import { changePassword, fetchMyQuota, fetchSshConfig } from '../api';
 import SshKeysSection from './SshKeysSection';
+import MfaSection from './MfaSection';
 import { useT } from '../i18n';
 import Icon from './Icons';
 
@@ -65,6 +66,8 @@ export default function ProfileModal({ user, onClose }) {
     const [loading, setLoading] = useState(false);
     const [sshEnabled, setSshEnabled] = useState(false);
     useEffect(() => { fetchSshConfig().then(c => setSshEnabled(!!c.enabled)); }, []);
+    const [quota, setQuota] = useState(null);
+    useEffect(() => { if (user?.role === 'student') fetchMyQuota().then(setQuota).catch(() => {}); }, [user?.role]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -145,6 +148,13 @@ export default function ProfileModal({ user, onClose }) {
                     </div>
                 </div>
 
+                {quota && quota.limits.max_vms > 0 && (
+                    <div data-testid="my-quota" style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--text2)' }}>
+                        <span style={{ color: 'var(--text3)' }}>{t('quota.mine')}: </span>
+                        {t('quota.mineLine', { used: `${quota.usage.vms} VM`, limit: `${quota.limits.max_vms} VM` })}
+                    </div>
+                )}
+
                 {/* Change password form */}
                 <form onSubmit={handleSubmit} style={{ padding: '18px 20px 20px' }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 14, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -202,6 +212,8 @@ export default function ProfileModal({ user, onClose }) {
                         {loading ? t('common.saving') : t('profile.save')}
                     </button>
                 </form>
+
+                <MfaSection />
 
                 {sshEnabled && <SshKeysSection />}
             </div>

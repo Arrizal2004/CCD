@@ -703,7 +703,8 @@ async def get_student_vm_access(user_id: int, host_name: str = None) -> dict:
     for r in rows:
         key = (r["vm_id"], r["host_name"])
         levels[key] = "full" if r["access"] == "full" else levels.get(key, "web")
-    return levels
+    from services import exam_mode            # selama ujian kelasnya berjalan, hanya VM ujian yang tersisa
+    return await exam_mode.restrict_levels(user_id, levels)
 
 
 async def get_student_vm_ids(user_id: int, host_name: str = None, full_only: bool = False) -> set:

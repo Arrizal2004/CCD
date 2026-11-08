@@ -7,7 +7,7 @@ const btn = (filled) => ({
     background: filled ? 'var(--red)' : 'transparent', color: filled ? '#fff' : 'var(--red)', border: '1px solid var(--red)',
 });
 
-export default function VmDeletePanel({ instance, node, vmid, vmName, onDeleted }) {
+export default function VmDeletePanel({ instance, node, vmid, vmName, locked = false, onDeleted }) {
     const t = useT();
     const [open, setOpen] = useState(false);
     const [confirmName, setConfirmName] = useState('');
@@ -29,7 +29,9 @@ export default function VmDeletePanel({ instance, node, vmid, vmName, onDeleted 
         <div style={{ marginTop: 18, border: '1px solid var(--red)', borderRadius: 8, padding: '10px 12px', background: 'var(--red-glow)' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>{t('del.title')}</div>
             {error && <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 8 }}>⚠ {error}</div>}
-            {!open ? (
+            {locked ? (
+                <div data-testid="delete-locked" style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>{t('lock.deleteBlocked')}</div>
+            ) : !open ? (
                 <button onClick={() => setOpen(true)} style={btn(false)}>{t('del.open')}</button>
             ) : (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>

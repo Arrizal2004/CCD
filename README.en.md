@@ -29,6 +29,12 @@ A student signs in, sees the VMs assigned to them, and clicks **Connect**. An SS
 - System settings for superadmins: name, logo, accent colour, default language (Indonesian or English), time zone (a live date and time in the header), announcements, sign-up rules, defaults (VM lease, account validity), audit log retention, and the SSH bastion address. Helpdesk categories are managed from the Helpdesk page, and OS choices (with logos) from the Infra Requests page. A school or campus can adapt the dashboard without touching the code.
 - SSH from your own terminal (optional): through a bastion on the VPS with an SSH key, only to the VMs that belong to the user. Works for `scp`, `sftp` and VS Code Remote-SSH.
 - Sysadmin per Proxmox: a sysadmin can be limited to specific Proxmox servers. The limit covers VMs, networks, assignments, groups, tickets, Infra Requests, the activity log, Remote/Web/SSH sessions, Open Web, the SSH bastion and Guacamole access.
+- Account security: two-step verification (TOTP) with recovery codes, which can be required for admins or for everyone; self-service password reset through an emailed link (SMTP, optional) next to the admin reset. See [docs/AKUN_DAN_EMAIL.md](docs/AKUN_DAN_EMAIL.md) (Indonesian).
+- VM operations for admins: schedules that start, shut down or snapshot a VM on chosen days and times; VM lock (Proxmox Protection) against accidental deletion; a browser VM console (noVNC); background VM creation with a history and a Retry button.
+- Per-student quotas (number of VMs, vCPU, RAM, disk), resolved user → group → system default and checked when a VM is assigned.
+- Automatic templates from official cloud images (Ubuntu 24.04 LTS and openSUSE Leap 16.0) that show up in Create VM right away. See [docs/CLOUD_IMAGES.md](docs/CLOUD_IMAGES.md) (Indonesian).
+- Class features: lab reset to a baseline (one VM or a whole class), exam mode (time window, exam VMs only, no VM changes) and a per-class usage report (sessions, minutes, active days, CSV). See [docs/KELAS_DAN_UJIAN.md](docs/KELAS_DAN_UJIAN.md) (Indonesian).
+- Outgoing email: VM lease warnings and password reset links through an SMTP queue with retries.
 - Audit & Remote:
   - An activity log that can be filtered by account, action, severity and date, exported to CSV, and shown in the language of the admin viewing it (Indonesian or English). Changes to accounts, groups, Proxmox instances, tickets and infrastructure requests are recorded.
   - A summary of failed sign-ins per account and per IP.
@@ -51,7 +57,7 @@ Everything above, except Proxmox and Tailscale, runs as containers from a single
 
 ## Installation
 
-Requirements: a Linux server (Ubuntu, Debian or openSUSE) with root or sudo access, port 80 free, and the ability to reach the Proxmox API (port 8006). We run it on a VPS with 2 vCPU and 2 GB of RAM.
+Requirements: a Linux server (Ubuntu, Debian or openSUSE) with root or sudo access, port 80 free (or pick another with `FRONTEND_PORT=8080 ./setup.sh`), and the ability to reach the Proxmox API (port 8006). We run it on a VPS with 2 vCPU and 2 GB of RAM.
 
 ```bash
 git clone <repo-url> campus-cloud-dashboard
@@ -120,12 +126,13 @@ How to report a security issue is described in [SECURITY.md](SECURITY.md) (Engli
 ## Known limitations
 
 - Sign-in works with local dashboard accounts only.
-- Roles: superadmin, sysadmin and student. A superadmin manages every Proxmox; a sysadmin only the Proxmox servers assigned to them (set by a superadmin on the Users page), and without an assignment sees none. There are no per-student resource quotas.
-- There is no two-factor authentication (2FA) yet. Protect superadmin accounts with strong passwords.
+- Roles: superadmin, sysadmin and student. A superadmin manages every Proxmox; a sysadmin only the Proxmox servers assigned to them (set by a superadmin on the Users page), and without an assignment sees none. Resource quotas can be set per student, per group, or as a system default.
+- 2FA uses TOTP; security keys (WebAuthn) and SSO (SAML/OIDC) are not supported. Require 2FA for admins in System settings.
 - The built-in backup is stored on the same server; copy it off the server yourself (see section 9 of the guide).
-- There are no outgoing notifications (email or messages) yet; service health is on the Status page.
-- Dashboard passwords are reset by an admin; the dashboard does not send email.
+- Outgoing email covers lease warnings and password resets only; other notifications (tickets, Slack or Teams messages) do not exist yet. Service health is on the Status page.
+- Password reset by email is optional and off by default; without it an admin resets passwords.
 - Proxmox VE is the only supported hypervisor.
+- Exam mode restricts what the dashboard shows and allows. Direct access to Guacamole is not restricted, so do not expose Guacamole to users.
 - Used at the scale of a single practical lab.
 
 ## Status

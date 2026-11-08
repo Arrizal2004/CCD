@@ -18,6 +18,8 @@ vi.mock('../api', () => ({
     resetUserPassword: vi.fn(),
     fetchPasswordHelp: vi.fn(),
     dismissPasswordHelp: vi.fn(),
+    fetchSelfResetAvailable: vi.fn(() => Promise.resolve({ enabled: false })),
+    requestPasswordReset: vi.fn(), verifyResetToken: vi.fn(), confirmPasswordReset: vi.fn(),
 }));
 
 import * as api from '../api';
@@ -35,7 +37,7 @@ describe('Lupa password di halaman login', () => {
         fireEvent.change(screen.getByPlaceholderText('username'), { target: { value: 'budi' } });
         fireEvent.click(screen.getByRole('button', { name: 'Lupa password?' }));
 
-        expect(screen.getByPlaceholderText('username').value).toBe('budi');
+        expect((await screen.findByPlaceholderText('username')).value).toBe('budi');   // formulir dipilih setelah cek reset lewat email
         fill('Pesan untuk admin (opsional)', ' Kelas TKJ 12A ');
         fireEvent.click(screen.getByRole('button', { name: 'Kirim Permintaan →' }));
 
@@ -45,10 +47,10 @@ describe('Lupa password di halaman login', () => {
         expect(screen.getByRole('button', { name: 'Masuk →' })).toBeTruthy();
     });
 
-    it('username wajib diisi', () => {
+    it('username wajib diisi', async () => {
         render(<LoginPage onLogin={vi.fn()} />);
         fireEvent.click(screen.getByRole('button', { name: 'Lupa password?' }));
-        fireEvent.click(screen.getByRole('button', { name: 'Kirim Permintaan →' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Kirim Permintaan →' }));
         expect(screen.getByText(/Username wajib diisi/)).toBeTruthy();
         expect(api.requestPasswordHelp).not.toHaveBeenCalled();
     });

@@ -90,6 +90,8 @@ async def _authorize(user: dict, ip) -> None:
     """Admin: semua IP privat. Student: hanya IP VM yang ditugaskan kepadanya (dicek lagi tiap membuka atau
     memperpanjang, supaya akses yang sudah dicabut tidak bisa dilanjutkan lewat riwayat)."""
     if user["role"] == Role.STUDENT:
+        from services import exam_mode            # Open Web ditutup untuk kelas yang sedang ujian (kalau diatur demikian)
+        await exam_mode.deny_if_exam(user, open_web=True)
         if str(ip) not in await _student_ips(int(user["sub"])):
             raise HTTPException(403, tr("Anda hanya boleh membuka web di VM yang ditugaskan kepada Anda",
                                         "You may only open web pages on VMs assigned to you"))

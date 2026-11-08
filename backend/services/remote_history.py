@@ -193,3 +193,17 @@ async def purge(cutoff: datetime) -> int:
         return await conn.fetchval(
             "WITH d AS (DELETE FROM guacamole_connection_history WHERE start_date < $1 AND end_date IS NOT NULL "
             "RETURNING 1) SELECT count(*) FROM d", cutoff) or 0
+
+
+async def sessions_between(usernames: list[str], start: datetime, end: datetime) -> list[dict] | None:
+    """Sesi Remote yang beririsan dengan [start, end) milik `usernames`: [{username, connection, start, end}].
+    None kalau database Guacamole tidak bisa dibaca (laporan lalu menandai data Remote tidak tersedia)."""
+    pool = await _get_pool()
+    if pool is None:
+        return None
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT username, connection_name, start_date, end_date FROM guacamole_connection_history
+               WHERE lower(username) = ANY($1) AND start_date < $3 AND COALESCE(end_date, NOW()) > $2
+               ORDER BY start_date""", [u.lower() for u in usernames], start, end)
+    return [{"username": r["username"], "connection": r["connection_name"], "start": r["start_date"], "end": r["end_date"]} for r in rows]

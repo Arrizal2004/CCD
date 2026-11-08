@@ -7,6 +7,9 @@ import VmOsAccountsPanel, { NewPasswordNotice, ResetPasswordForm } from './VmOsA
 import ProxmoxVmHistoryChart from './ProxmoxVmHistoryChart';
 import SshCredModal from './SshCredModal';
 import VmDeletePanel from './VmDeletePanel';
+import VmLockPanel from './VmLockPanel';
+import VmLabPanel from './VmLabPanel';
+import VmSchedulePanel from './VmSchedulePanel';
 import { CreateTicketModal } from './TicketsPage';
 import { t as translate, useT } from '../i18n';
 
@@ -115,6 +118,7 @@ export default function ProxmoxVmDetailModal({ instance, node, vmid, ccdId = nul
     const [data, setData] = useState(null);
     const [error, setError] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [lockOverride, setLockOverride] = useState(null);   // hasil terbaru dari tombol kunci (config belum dimuat ulang)
     const [tab, setTab] = useState('info'); // 'info' | 'history' | 'assignments' | 'accounts'
     const [ipInfo, setIpInfo] = useState(null);
     const [agentBusy, setAgentBusy] = useState(false);
@@ -247,7 +251,7 @@ export default function ProxmoxVmDetailModal({ instance, node, vmid, ccdId = nul
 
                 <div style={{ display: 'flex', gap: 4, marginBottom: 14, borderBottom: '1px solid var(--border)' }}>
                     {[{ id: 'info', label: t('vm.tabInfo') }, { id: 'history', label: t('vm.tabHistory') },
-                      ...(isAdmin ? [{ id: 'assignments', label: t('vm.tabAssignments') }, { id: 'accounts', label: t('vm.tabAccounts') }] : [])].map(tb => (
+                      ...(isAdmin ? [{ id: 'assignments', label: t('vm.tabAssignments') }, { id: 'accounts', label: t('vm.tabAccounts') }, { id: 'schedule', label: t('sched.tab') }] : [])].map(tb => (
                         <button key={tb.id} onClick={() => setTab(tb.id)}
                             style={{
                                 padding: '6px 12px', fontSize: 12, cursor: 'pointer', background: 'transparent', border: 'none',
@@ -280,6 +284,10 @@ export default function ProxmoxVmDetailModal({ instance, node, vmid, ccdId = nul
 
                 {tab === 'assignments' && isAdmin && (
                     <ProxmoxAssignmentsPanel hostName={`${instance}__${node}`} vmid={vmid} vmName={config.name} />
+                )}
+
+                {tab === 'schedule' && isAdmin && (
+                    <VmSchedulePanel instance={instance} node={node} vmid={vmid} />
                 )}
 
                 {tab === 'accounts' && isAdmin && (
@@ -365,8 +373,13 @@ export default function ProxmoxVmDetailModal({ instance, node, vmid, ccdId = nul
                 )}
 
                 {tab === 'info' && data && isAdmin && (
-                    <VmDeletePanel instance={instance} node={node} vmid={vmid}
-                        vmName={config.name || String(vmid)} onDeleted={onDeleted} />
+                    <>
+                        <VmLabPanel instance={instance} node={node} vmid={vmid} vmName={config.name || String(vmid)} running={status.qmpstatus === 'running'} />
+                        <VmLockPanel instance={instance} node={node} vmid={vmid} vmName={config.name || String(vmid)}
+                            locked={lockOverride ?? String(config.protection) === '1'} onChanged={setLockOverride} />
+                        <VmDeletePanel instance={instance} node={node} vmid={vmid}
+                            vmName={config.name || String(vmid)} locked={lockOverride ?? String(config.protection) === '1'} onDeleted={onDeleted} />
+                    </>
                 )}
             </div>
         </div>

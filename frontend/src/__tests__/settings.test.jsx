@@ -9,6 +9,13 @@ vi.mock('../api', () => ({
     deleteSystemLogo: vi.fn(),
     fetchBranding: vi.fn(() => Promise.resolve({})),
     fetchSystemConfig: vi.fn(() => Promise.resolve({})),
+    fetchMfaPolicy: vi.fn(() => Promise.resolve({ required: 'off' })),
+    saveMfaPolicy: vi.fn(() => Promise.resolve({ required: 'off' })),
+    fetchEmailSettings: vi.fn(() => new Promise(() => {})),
+    saveEmailSettings: vi.fn(), sendTestEmail: vi.fn(),
+    fetchEmailOutbox: vi.fn(() => new Promise(() => {})),
+    fetchQuotaDefaults: vi.fn(() => new Promise(() => {})), saveQuotaDefaults: vi.fn(),
+    fetchLabSettings: vi.fn(() => new Promise(() => {})), saveLabSettings: vi.fn(),
 }));
 
 import * as api from '../api';

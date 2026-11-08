@@ -5,6 +5,7 @@ Dipakai endpoint assign (Users), request VPS yang selesai, dan pembuatan VM mass
 import asyncio
 
 from database import get_pool
+from services import quotas
 from services.guac_sync import (
     grant_connection, sync_os_account_connection, sync_vm_assignments, with_retry as guac_retry,
 )
@@ -18,6 +19,7 @@ async def assign_vm(user_id: int, vm_id: str, host_name: str, vm_name: str | Non
     yang sudah ada dicabut oleh sinkronisasi di bawah."""
     if access == "web":
         os_account_id = None
+    await quotas.check_assign(user_id, vm_id, host_name)      # 409 kalau melewati kuota mahasiswa
     pool = await get_pool()
     async with pool.acquire() as conn:
         if not vm_name:

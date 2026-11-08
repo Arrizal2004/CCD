@@ -22,7 +22,7 @@ from services.guac_sync import (
     get_user_token,
 )
 from services.audit import both, log_activity, _client_ip
-from services import scope
+from services import scope, mfa, onetime
 from services.login_rate_limit import (
     seconds_locked, record_failure, record_success, clear as clear_login_lock, allow as rate_allow,
 )
@@ -121,8 +121,6 @@ async def login(body: LoginRequest, request: Request):
             detail=tr("Username atau password salah", "Wrong username or password")
         )
 
-    await record_success(body.username)
-
     if not user["is_active"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -136,23 +134,44 @@ async def login(body: LoginRequest, request: Request):
                       "This account has expired. Please contact an administrator.")
         )
 
-    # Update last_login
+    # 2FA: password benar baru langkah pertama. Password disimpan terenkripsi bersama tantangan (5 menit)
+    # karena akun Guacamole memakai password yang sama dan baru dibuka setelah kode benar.
+    has_mfa = user["mfa_secret_enc"] is not None
+    needs_second_step = has_mfa or mfa.required_for(await mfa.get_policy(), user["role"])
+    if not needs_second_step:
+        # Hitungan gagal baru dihapus saat login benar-benar selesai. Untuk akun dengan 2FA, password benar saja
+        # belum cukup: kalau dihapus di sini, penyerang yang tahu password bisa login ulang tanpa batas untuk menebak kode.
+        await record_success(body.username)
+    if needs_second_step:
+        challenge = onetime.new_id()
+        await onetime.put("mfa", challenge, {"uid": user["id"], "pwv": user["password_version"], "pw": body.password,
+                                              "setup": not has_mfa, "tries": 0}, MFA_TTL)
+        return {"mfa_required": has_mfa, "mfa_setup_required": not has_mfa, "mfa_token": challenge,
+                "expires_in": MFA_TTL}
+
+    return await _start_session(user, body.password, request)
+
+
+async def _start_session(user, password: str, request: Request, method: str = "password") -> dict:
+    """Akhir login yang sukses: catat login, buat token, buka sesi Guacamole."""
+    pool = await get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE users SET last_login = NOW() WHERE id = $1", user["id"]
-        )
+        await conn.execute("UPDATE users SET last_login = NOW() WHERE id = $1", user["id"])
 
     token = create_token(user["id"], user["username"], user["role"], user["password_version"])
     await log_activity(
         {"sub": user["id"], "username": user["username"], "role": user["role"]},
-        "AUTH_LOGIN", "INFO", None, both(lambda: tr("Login berhasil", "Signed in")), request)
+        "AUTH_LOGIN", "INFO", None,
+        both(lambda: tr("Login berhasil", "Signed in") if method == "password"
+             else (tr("Login berhasil dengan kode pemulihan 2FA", "Signed in with a 2FA recovery code") if method == "recovery"
+                   else tr("Login berhasil dengan 2FA", "Signed in with 2FA"))), request)
 
     # Login ke Guacamole sebagai user — non-blocking, gagal tidak menghentikan login. Dengan password
     # sementara dari admin belum ada Connect; token Guacamole diberikan setelah password diganti.
     guac_auth: dict = {}
     if not user["must_change_password"]:
         try:
-            guac_auth = await asyncio.wait_for(_guac_login(user, body.password, _client_ip(request)), timeout=10.0)
+            guac_auth = await asyncio.wait_for(_guac_login(user, password, _client_ip(request)), timeout=10.0)
         except Exception:
             pass
 
@@ -170,6 +189,121 @@ async def login(body: LoginRequest, request: Request):
             "must_change_password": user["must_change_password"],
         }
     }
+
+
+# ── 2FA saat login ────────────────────────────────────────────
+MFA_TTL = 300
+MFA_MAX_TRIES = 5
+
+
+class MfaLoginBody(BaseModel):
+    mfa_token: str
+    code:      str = ""
+
+
+class MfaCodeBody(BaseModel):
+    code: str
+
+
+class MfaDisableBody(BaseModel):
+    code:     str
+    password: str = ""
+
+
+def _challenge_expired() -> HTTPException:
+    return HTTPException(401, tr("Waktu verifikasi habis. Silakan login lagi.", "The verification step has expired. Please sign in again."))
+
+
+async def _challenge_user(body: MfaLoginBody, setup: bool):
+    """Tantangan 2FA yang masih berlaku beserta akun pemiliknya (diperiksa ulang: aktif, belum kedaluwarsa, password sama)."""
+    ch = await onetime.get("mfa", body.mfa_token)
+    if not ch or bool(ch.get("setup")) != setup:
+        raise _challenge_expired()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        user = await conn.fetchrow("SELECT * FROM users WHERE id = $1 AND deleted_at IS NULL", ch["uid"])
+    if (not user or user["password_version"] != ch["pwv"] or not user["is_active"]
+            or (user["expires_at"] and user["expires_at"] <= datetime.now(timezone.utc))):
+        await onetime.delete("mfa", body.mfa_token)
+        raise _challenge_expired()
+    locked_for = await seconds_locked(user["username"])
+    if locked_for:
+        raise HTTPException(429, tr(f"Terlalu banyak percobaan gagal. Coba lagi dalam {locked_for} detik.",
+                                    f"Too many failed attempts. Try again in {locked_for} seconds."))
+    return ch, user
+
+
+async def _mfa_failed(body: MfaLoginBody, ch: dict, user, request: Request) -> HTTPException:
+    """Catat kode salah: hitungan per tantangan dan kunci akun yang sama dengan password salah."""
+    ch["tries"] = int(ch.get("tries", 0)) + 1
+    left = await onetime.ttl("mfa", body.mfa_token)
+    if ch["tries"] >= MFA_MAX_TRIES or left <= 0:
+        await onetime.delete("mfa", body.mfa_token)
+    else:
+        await onetime.put("mfa", body.mfa_token, ch, left)
+    await record_failure(user["username"])
+    await log_activity(
+        {"sub": user["id"], "username": user["username"], "role": user["role"]},
+        "AUTH_MFA_FAILED", "WARNING", None,
+        both(lambda: tr(f"Kode 2FA salah untuk '{user['username']}'", f"Wrong 2FA code for '{user['username']}'")), request)
+    if ch["tries"] >= MFA_MAX_TRIES:
+        return HTTPException(401, tr("Terlalu banyak kode salah. Silakan login lagi.", "Too many wrong codes. Please sign in again."))
+    return mfa.bad_code()
+
+
+@router.post("/login/mfa")
+async def login_mfa(body: MfaLoginBody, request: Request):
+    """Langkah kedua login: kode dari aplikasi authenticator, atau salah satu kode pemulihan."""
+    ch, user = await _challenge_user(body, setup=False)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        kind = await mfa.verify_user_code(conn, user["id"], body.code)
+    if not kind:
+        raise await _mfa_failed(body, ch, user, request)
+    await onetime.delete("mfa", body.mfa_token)
+    await record_success(user["username"])
+    out = await _start_session(user, ch["pw"], request, method="recovery" if kind == "recovery" else "mfa")
+    if kind == "recovery":
+        async with pool.acquire() as conn:
+            out["recovery_codes_left"] = (await mfa.status(conn, user["id"]))["recovery_codes_left"]
+    return out
+
+
+async def _issuer_name() -> str:
+    from services import system_settings as ss
+    return (await ss.get_settings()).get("name") or "CCD"
+
+
+@router.post("/login/mfa/setup")
+async def login_mfa_setup(body: MfaLoginBody):
+    """Kebijakan mewajibkan 2FA tetapi akun belum memasangnya: buat rahasia baru untuk dipindai."""
+    ch, user = await _challenge_user(body, setup=True)
+    if not ch.get("secret"):
+        ch["secret"] = mfa.new_secret()
+        await onetime.put("mfa", body.mfa_token, ch, max(await onetime.ttl("mfa", body.mfa_token), 1))
+    return mfa.enrollment(ch["secret"], user["username"], await _issuer_name())
+
+
+@router.post("/login/mfa/enable")
+async def login_mfa_enable(body: MfaLoginBody, request: Request):
+    ch, user = await _challenge_user(body, setup=True)
+    step = mfa.match_step(ch.get("secret") or "", body.code) if ch.get("secret") else None
+    if step is None:
+        raise await _mfa_failed(body, ch, user, request)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            codes = await mfa.enable(conn, user["id"], ch["secret"], step)
+    await onetime.delete("mfa", body.mfa_token)
+    await record_success(user["username"])
+    await log_activity(
+        {"sub": user["id"], "username": user["username"], "role": user["role"]},
+        "MFA_ENABLED", "INFO", None,
+        both(lambda: tr(f"User '{user['username']}' memasang 2FA (wajib menurut kebijakan)",
+                        f"User '{user['username']}' set up 2FA (required by policy)")), request)
+    out = await _start_session(user, ch["pw"], request, method="mfa")
+    out["recovery_codes"] = codes
+    return out
 
 
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
@@ -296,13 +430,133 @@ async def get_me(user: dict = Depends(get_current_user)):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """SELECT id, username, full_name, role, email, is_verified, last_login, created_at, must_change_password
+            """SELECT id, username, full_name, role, email, is_verified, last_login, created_at, must_change_password,
+                      mfa_secret_enc IS NOT NULL AS mfa_enabled
                FROM users WHERE id = $1""",
             int(user["sub"])
         )
     if not row:
         raise HTTPException(status_code=404, detail=tr("User tidak ditemukan", "User not found"))
     return dict(row)
+
+
+# ── 2FA: pengaturan akun sendiri ──────────────────────────────
+@router.get("/me/mfa")
+async def my_mfa(user: dict = Depends(get_current_user)):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        out = await mfa.status(conn, int(user["sub"]))
+    out["required"] = mfa.required_for(await mfa.get_policy(), user.get("role"))
+    return out
+
+
+@router.post("/me/mfa/setup")
+async def my_mfa_setup(user: dict = Depends(get_current_user)):
+    """Rahasia baru untuk dipindai. Baru berlaku setelah dikonfirmasi dengan satu kode (10 menit)."""
+    uid = int(user["sub"])
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if (await mfa.status(conn, uid))["enabled"]:
+            raise HTTPException(409, tr("2FA sudah aktif. Nonaktifkan dulu untuk memasang ulang.",
+                                        "2FA is already on. Turn it off first to set it up again."))
+    secret = mfa.new_secret()
+    await onetime.put("mfa-enroll", str(uid), {"secret": secret}, 600)
+    return mfa.enrollment(secret, user.get("username") or "", await _issuer_name())
+
+
+@router.post("/me/mfa/enable")
+async def my_mfa_enable(body: MfaCodeBody, request: Request, user: dict = Depends(get_current_user)):
+    uid = int(user["sub"])
+    pending = await onetime.get("mfa-enroll", str(uid))
+    if not pending:
+        raise HTTPException(400, tr("Waktu pemasangan habis. Mulai lagi.", "The setup has expired. Start again."))
+    step = mfa.match_step(pending["secret"], body.code)
+    if step is None:
+        raise mfa.bad_code()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if (await mfa.status(conn, uid))["enabled"]:
+                raise HTTPException(409, tr("2FA sudah aktif", "2FA is already on"))
+            codes = await mfa.enable(conn, uid, pending["secret"], step)
+    await onetime.delete("mfa-enroll", str(uid))
+    await log_activity(user, "MFA_ENABLED", "INFO", None,
+                       both(lambda: tr(f"User '{user.get('username')}' mengaktifkan 2FA",
+                                       f"User '{user.get('username')}' turned on 2FA")), request)
+    return {"recovery_codes": codes}
+
+
+@router.post("/me/mfa/disable")
+async def my_mfa_disable(body: MfaDisableBody, request: Request, user: dict = Depends(get_current_user)):
+    """Matikan 2FA sendiri: butuh kode 2FA dan password."""
+    uid = int(user["sub"])
+    if mfa.required_for(await mfa.get_policy(), user.get("role")):
+        raise HTTPException(403, tr("Kebijakan sistem mewajibkan 2FA untuk akun Anda",
+                                    "The system policy requires 2FA for your account"))
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        pw_hash = await conn.fetchval("SELECT password_hash FROM users WHERE id = $1", uid)
+        if not pw_hash or not verify_password(body.password, pw_hash):
+            raise HTTPException(400, tr("Password salah", "Wrong password"))
+        if not await mfa.verify_user_code(conn, uid, body.code):
+            raise mfa.bad_code()
+        await mfa.disable(conn, uid)
+    await log_activity(user, "MFA_DISABLED", "WARNING", None,
+                       both(lambda: tr(f"User '{user.get('username')}' menonaktifkan 2FA",
+                                       f"User '{user.get('username')}' turned off 2FA")), request)
+    return {"ok": True}
+
+
+@router.post("/me/mfa/recovery-codes")
+async def my_mfa_recovery_codes(body: MfaCodeBody, request: Request, user: dict = Depends(get_current_user)):
+    """Buat 10 kode pemulihan baru; kode lama tidak berlaku lagi."""
+    uid = int(user["sub"])
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if await mfa.verify_user_code(conn, uid, body.code) != "totp":
+            raise mfa.bad_code()
+        async with conn.transaction():
+            codes = await mfa.replace_recovery_codes(conn, uid)
+    await log_activity(user, "MFA_RECOVERY_CODES", "INFO", None,
+                       both(lambda: tr(f"User '{user.get('username')}' membuat kode pemulihan 2FA baru",
+                                       f"User '{user.get('username')}' generated new 2FA recovery codes")), request)
+    return {"recovery_codes": codes}
+
+
+@router.post("/{user_id}/mfa/reset")
+async def admin_mfa_reset(user_id: int, request: Request, current: dict = Depends(require_sysadmin)):
+    """Admin mematikan 2FA pengguna yang kehilangan ponselnya dan kode pemulihannya. Sesi lamanya berakhir."""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            target = await _visible_target(conn, current, user_id)
+            await mfa.disable(conn, user_id)
+            await conn.execute("UPDATE users SET password_version = password_version + 1, updated_at = NOW() WHERE id = $1", user_id)
+    forget_account(user_id)
+    try:
+        from routers.guac import disconnect_user
+        await disconnect_user(target["username"])
+    except Exception:
+        pass
+    await log_activity(current, "MFA_RESET", "WARNING", None,
+                       both(lambda: tr(f"{current.get('username')} mereset 2FA akun '{target['username']}'",
+                                       f"{current.get('username')} reset 2FA of the account '{target['username']}'")), request)
+    return {"ok": True}
+
+
+@router.get("/mfa-policy")
+async def get_mfa_policy(user: dict = Depends(require_superadmin)):
+    return await mfa.get_policy()
+
+
+@router.put("/mfa-policy")
+async def put_mfa_policy(body: dict, request: Request, user: dict = Depends(require_superadmin)):
+    policy = await mfa.save_policy(body, user.get("username") or "")
+    await log_activity(user, "MFA_POLICY", "WARNING", None,
+                       both(lambda: tr(f"Kebijakan 2FA diubah menjadi '{policy['required']}'",
+                                       f"The 2FA policy was changed to '{policy['required']}'")), request)
+    return policy
+
 
 
 @router.post("/me/change-password")
@@ -468,6 +722,57 @@ async def request_password_help(body: PasswordHelpRequest, request: Request):
                           "password in person.")}
 
 
+# ── Reset password lewat tautan email (publik) ────────────────
+class ResetRequestBody(BaseModel):
+    identifier: str
+
+
+class ResetConfirmBody(BaseModel):
+    token:    str
+    password: str = ""
+
+
+@router.get("/password-reset")
+async def password_reset_available():
+    """Publik: apakah halaman login menawarkan reset lewat email."""
+    from services import password_reset
+    return {"enabled": await password_reset.available()}
+
+
+@router.post("/password-reset/request")
+async def password_reset_request(body: ResetRequestBody, request: Request):
+    """Jawaban selalu sama, dan pekerjaannya dijalankan di latar belakang, supaya tidak bisa dipakai menebak
+    akun atau email yang terdaftar."""
+    from services import password_reset
+    ip = _client_ip(request)
+    if not await rate_allow(f"pwreset:ip:{ip}", 20, 3600):
+        raise HTTPException(429, tr("Terlalu banyak permintaan dari jaringan ini. Coba lagi nanti.",
+                                    "Too many requests from this network. Try again later."))
+    if await password_reset.available():
+        asyncio.create_task(password_reset.request_reset(body.identifier[:254], ip))
+    return {"message": tr("Kalau akun itu terdaftar dan punya email, tautan reset password sudah dikirim. Periksa kotak masuk dan folder spam.",
+                          "If that account exists and has an email address, a password reset link has been sent. Check your inbox and spam folder.")}
+
+
+@router.post("/password-reset/verify")
+async def password_reset_verify(body: ResetConfirmBody):
+    """Cek tautan sebelum menampilkan form password baru."""
+    from services import password_reset
+    user = await password_reset.account_for_token(body.token) if await password_reset.available() else None
+    if not user:
+        raise password_reset.invalid_link()
+    return {"username": user["username"]}
+
+
+@router.post("/password-reset/confirm")
+async def password_reset_confirm(body: ResetConfirmBody, request: Request):
+    from services import password_reset
+    out = await password_reset.confirm(body.token, body.password, _client_ip(request))
+    return {"message": tr("Password diganti. Silakan login dengan password baru.", "Password changed. Sign in with your new password."),
+            "username": out["username"]}
+
+
+
 @router.get("/password-help")
 async def list_password_help(current: dict = Depends(require_sysadmin)):
     """Permintaan Lupa password yang belum ditangani. Sysadmin hanya melihat akun mahasiswa."""
@@ -513,7 +818,7 @@ async def list_users(user: dict = Depends(require_sysadmin)):
         rows = await conn.fetch(
             """SELECT u.id, u.username, u.full_name, u.role, u.email,
                       u.is_active, u.is_verified, u.last_login, u.created_at, u.expires_at,
-                      u.must_change_password,
+                      u.must_change_password, u.mfa_secret_enc IS NOT NULL AS mfa_enabled,
                       ARRAY(SELECT gm.group_id FROM group_members gm WHERE gm.user_id = u.id) AS group_ids,
                       ARRAY(SELECT ui.instance FROM user_instances ui WHERE ui.user_id = u.id ORDER BY ui.instance) AS instances
                FROM users u WHERE u.deleted_at IS NULL ORDER BY u.role, u.username"""
@@ -945,6 +1250,8 @@ async def assign_vm(body: AssignVmRequest, request: Request, current: dict = Dep
     if body.access == "web" and body.os_account_id:
         raise HTTPException(400, tr("Akses 'Hanya Open Web' tidak bisa memakai OS account",
                                     "'Open Web only' access cannot use an OS account"))
+    from services import quotas
+    await quotas.check_assign(body.user_id, body.vm_id, body.host_name)     # sebelum dicatat sebagai berhasil
     detail = both(lambda: tr(f"Assign VM {body.vm_id} ke user #{body.user_id}", f"Assigned VM {body.vm_id} to user #{body.user_id}")
                   + (f" (OS account #{body.os_account_id})" if body.os_account_id else "")
                   + (tr(" (hanya Open Web)", " (Open Web only)") if body.access == "web" else ""))

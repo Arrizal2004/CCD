@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { fetchProxmoxTemplates, createProxmoxVm, fetchNetworks, fetchProxmoxInstances, fetchProxmoxNodes } from '../api';
+import { fetchProxmoxTemplates, createProxmoxVm, createVmJob, fetchNetworks, fetchProxmoxInstances, fetchProxmoxNodes } from '../api';
 import { useSysConfig } from '../sysconfig';
 import { useT } from '../i18n';
 
@@ -40,7 +40,7 @@ function templateFields(tpl, initial) {
 
 // instance/node kosong (dibuka dari request VPS): admin memilih Proxmox-nya di form.
 // initial: nilai awal dari permintaan mahasiswa {name, username, password, cores, memory_mb, disk_gb, os, note}.
-export default function CreateVmModal({ instance, node, initial = null, onClose, onCreated }) {
+export default function CreateVmModal({ instance, node, initial = null, onClose, onCreated, onBackground }) {
     const t = useT();
     const net = loadNet();
     const { default_vm_lease_days: defaultLease } = useSysConfig();
@@ -51,7 +51,7 @@ export default function CreateVmModal({ instance, node, initial = null, onClose,
         template_vmid: '', name: initial?.name || '', cores: '', memory_mb: '', disk_gb: '', bridge: '',
         username: initial?.username || '', password: initial?.password || '', ip_mode: 'static',
         ip_cidr: net.prefix ? `/${net.prefix}` : '', gateway: net.gateway || '', dns: net.dns || '',
-        full_clone: false, start: true, lease_days: defaultLease ? String(defaultLease) : '',
+        full_clone: false, start: true, background: false, lease_days: defaultLease ? String(defaultLease) : '',
         network_id: '',
     });
     const [switches, setSwitches] = useState([]);   // switch CCD di Proxmox ini
@@ -120,14 +120,22 @@ export default function CreateVmModal({ instance, node, initial = null, onClose,
                 gateway: form.ip_mode === 'static' ? form.gateway.trim() : null,
                 bridge: form.bridge.trim() || null,
             };
-            const res = await createProxmoxVm(target.instance, target.node, {
+            const payload = {
                 template_vmid: Number(form.template_vmid), name: form.name.trim(),
                 username: form.username.trim(), password: form.password,
                 ...network,
                 dns: form.dns.trim() || null,
                 cores: num(form.cores), memory_mb: num(form.memory_mb), disk_gb: num(form.disk_gb),
                 full_clone: form.full_clone, start: form.start, lease_days: num(form.lease_days),
-            });
+            };
+            if (form.background) {                    // proses latar belakang: langsung dijawab, hasilnya ada di Riwayat pembuatan
+                const job = await createVmJob({ ...payload, instance: target.instance, node: target.node });
+                onCreated?.(null, target);
+                onClose?.();
+                onBackground?.(job);
+                return;
+            }
+            const res = await createProxmoxVm(target.instance, target.node, payload);
             if (!sw) {
                 try {
                     localStorage.setItem(NET_KEY, JSON.stringify({
@@ -286,6 +294,10 @@ export default function CreateVmModal({ instance, node, initial = null, onClose,
                         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>
                             <input type="checkbox" checked={form.start} onChange={set('start')} />
                             {t('create.start')}
+                        </label>
+                        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>
+                            <input type="checkbox" checked={form.background} onChange={set('background')} />
+                            {t('jobs.background')}
                         </label>
 
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 16 }}>

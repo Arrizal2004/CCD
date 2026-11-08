@@ -1,6 +1,7 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import axios from 'axios';
-import { registerStudent, requestPasswordHelp, changePassword, storeSession } from '../api';
+import { registerStudent, requestPasswordHelp, changePassword, storeSession,
+    fetchSelfResetAvailable, requestPasswordReset, verifyResetToken, confirmPasswordReset } from '../api';
 import { useBranding } from '../branding';
 import { useT } from '../i18n';
 import BrandLogo from '../components/BrandLogo';
@@ -8,6 +9,7 @@ import LanguageToggle from '../components/LanguageToggle';
 import ThemeToggle from '../components/ThemeToggle';
 import AnnouncementBanner from '../components/AnnouncementBanner';
 import Icon from '../components/Icons';
+import { QrImage, RecoveryCodes } from '../components/MfaSection';
 
 const BASE = import.meta.env.VITE_API_URL || '';
 
@@ -85,7 +87,7 @@ const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border-lig
 const LINK = { background: 'none', border: 'none', color: 'var(--cyan)', cursor: 'pointer', fontSize: 12, fontWeight: 600, padding: 0 };
 const submitStyle = (loading) => ({ width: '100%', padding: 11, borderRadius: 8, background: loading ? 'var(--bg-hover)' : 'var(--cyan)', color: loading ? 'var(--text3)' : '#000', fontSize: 13, fontWeight: 700, border: 'none', cursor: loading ? 'not-allowed' : 'pointer', transition: 'all 0.15s' });
 
-function LoginForm({ onLogin, notice, onGoRegister, onGoForgot }) {
+function LoginForm({ onLogin, onMfa, notice, onGoRegister, onGoForgot }) {
     const b = useBranding();
     const t = useT();
     const [username, setUser] = useState('');
@@ -100,6 +102,7 @@ function LoginForm({ onLogin, notice, onGoRegister, onGoForgot }) {
         setLoad(true); setErr('');
         try {
             const r = await axios.post(`${BASE}/api/v1/users/login`, { username, password });
+            if (r.data.mfa_token) { onMfa({ ...r.data, username, password }); return; }   // langkah kedua: kode 2FA
             storeSession(r.data.access_token, r.data.guac_auth);
             localStorage.setItem('hv_user', JSON.stringify(r.data.user));
             // Password sementara diteruskan (hanya di memori) supaya tidak perlu diketik ulang di layar ganti password.
@@ -166,6 +169,71 @@ function LoginForm({ onLogin, notice, onGoRegister, onGoForgot }) {
     );
 }
 
+// ── Langkah kedua login: kode 2FA, atau pemasangan 2FA yang diwajibkan ──────
+function MfaStep({ challenge, onLogin, onBack }) {
+    const t = useT();
+    const setup = !!challenge.mfa_setup_required;
+    const [code, setCode] = useState('');
+    const [enroll, setEnroll] = useState(null);
+    const [error, setErr] = useState('');
+    const [loading, setLoad] = useState(false);
+    const [pending, setPending] = useState(null);     // hasil login yang menunggu kode pemulihan disimpan
+    const mfaToken = challenge.mfa_token;
+
+    useEffect(() => {
+        if (!setup) return;
+        axios.post(`${BASE}/api/v1/users/login/mfa/setup`, { mfa_token: mfaToken })
+            .then(r => setEnroll(r.data)).catch(e => setErr(e?.response?.data?.detail || t('mfa.failed')));
+    }, [setup, mfaToken]);                            // eslint-disable-line react-hooks/exhaustive-deps
+
+    const finish = (data) => {
+        storeSession(data.access_token, data.guac_auth);
+        localStorage.setItem('hv_user', JSON.stringify(data.user));
+        onLogin(data.user, data.access_token, data.user.must_change_password ? challenge.password : undefined);
+    };
+
+    const submit = async (e) => {
+        e.preventDefault();
+        if (!code.trim()) return;
+        setLoad(true); setErr('');
+        try {
+            const r = await axios.post(`${BASE}/api/v1/users/login/mfa${setup ? '/enable' : ''}`, { mfa_token: mfaToken, code: code.trim() });
+            if (r.data.recovery_codes) setPending(r.data);   // tampilkan kode pemulihan dulu, baru masuk
+            else finish(r.data);
+        } catch (e2) {
+            setErr(e2?.response?.data?.detail || t('mfa.failed'));
+        } finally { setLoad(false); }
+    };
+
+    if (pending) return <div style={CARD}><RecoveryCodes codes={pending.recovery_codes} onDone={() => finish(pending)} /></div>;
+
+    return (
+        <div style={CARD}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>{setup ? t('mfa.setupRequiredTitle') : t('mfa.title')}</div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 18, lineHeight: 1.6 }}>
+                {setup ? t('mfa.setupRequiredHint') : t('mfa.loginHint')}
+            </div>
+            {setup && enroll && (
+                <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 10 }}><QrImage svg={enroll.qr_svg} /></div>
+                    <div style={{ fontSize: 11, color: 'var(--text3)' }}>{t('mfa.orEnterKey')}</div>
+                    <code style={{ display: 'block', fontSize: 12, wordBreak: 'break-all', marginTop: 4 }}>{enroll.secret}</code>
+                </div>
+            )}
+            <form onSubmit={submit}>
+                <Input label={t('mfa.code')} value={code} onChange={setCode} placeholder={setup ? '123456' : t('mfa.codePh')} autoFocus autoComplete="one-time-code" hasError={!!error} />
+                <ErrorBox msg={error} />
+                <button type="submit" disabled={loading || !code.trim() || (setup && !enroll)} style={submitStyle(loading)}>
+                    {loading ? t('mfa.verifying') : t('mfa.verify')}
+                </button>
+            </form>
+            <div style={{ marginTop: 14, textAlign: 'center' }}>
+                <button type="button" onClick={onBack} style={LINK}>{t('mfa.back')}</button>
+            </div>
+        </div>
+    );
+}
+
 // ── Lupa password ───────────────────────────────────────────────────────────
 // Tanpa email: permintaan masuk ke daftar admin di halaman Users. Jawaban server selalu sama, jadi
 // form ini tidak bisa dipakai untuk menebak username mana yang terdaftar.
@@ -223,6 +291,128 @@ function ForgotForm({ initialUsername, onGoLogin }) {
             </div>
         </div>
     );
+}
+
+// ── Lupa password: tautan email kalau diaktifkan superadmin, kalau tidak lewat permintaan ke admin ──
+function EmailResetForm({ initialUsername, onGoLogin, onUseAdmin }) {
+    const t = useT();
+    const [identifier, setIdentifier] = useState(initialUsername || '');
+    const [loading, setLoad] = useState(false);
+    const [error, setErr] = useState('');
+    const [done, setDone] = useState('');
+    const submit = async (e) => {
+        e.preventDefault();
+        if (!identifier.trim()) { setErr(t('reset.required')); return; }
+        setLoad(true); setErr('');
+        try { setDone((await requestPasswordReset(identifier.trim())).message); }
+        catch (e2) { setErr(e2?.response?.data?.detail || t('forgot.failed')); }
+        finally { setLoad(false); }
+    };
+    if (done) {
+        return (
+            <div style={{ ...CARD, textAlign: 'center' }}>
+                <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--green)' }}>{t('reset.sentTitle')}</div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 24, lineHeight: 1.7, padding: '10px 14px', background: 'var(--bg-hover)', borderRadius: 8 }}>{done}</div>
+                <button onClick={onGoLogin} style={LINK}>{t('forgot.back')}</button>
+            </div>
+        );
+    }
+    return (
+        <div style={CARD}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{t('forgot.title')}</div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 24, lineHeight: 1.6 }}>{t('reset.subtitle')}</div>
+            <form onSubmit={submit}>
+                <Input label={t('reset.identifier')} value={identifier} onChange={setIdentifier} placeholder={t('reset.identifierPh')}
+                    autoFocus autoComplete="username" hasError={!!error} />
+                <ErrorBox msg={error} />
+                <button type="submit" disabled={loading} style={{ ...submitStyle(loading), marginBottom: 12 }}>
+                    {loading ? t('forgot.submitting') : t('reset.send')}
+                </button>
+            </form>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={onUseAdmin} style={{ ...LINK, fontWeight: 500, color: 'var(--text3)' }}>{t('reset.useAdmin')}</button>
+                <button onClick={onGoLogin} style={LINK}>{t('forgot.back')}</button>
+            </div>
+        </div>
+    );
+}
+
+function ForgotChooser({ initialUsername, onGoLogin }) {
+    const [state, setState] = useState('loading');          // 'loading' | 'email' | 'admin'
+    useEffect(() => {
+        fetchSelfResetAvailable().then(r => setState(r.enabled ? 'email' : 'admin')).catch(() => setState('admin'));
+    }, []);
+    if (state === 'loading') return <div style={CARD} />;
+    if (state === 'email') {
+        return <EmailResetForm initialUsername={initialUsername} onGoLogin={onGoLogin} onUseAdmin={() => setState('admin')} />;
+    }
+    return <ForgotForm initialUsername={initialUsername} onGoLogin={onGoLogin} />;
+}
+
+// Halaman dari tautan email: ?reset=<token>.
+function ResetForm({ token, onGoLogin }) {
+    const t = useT();
+    const [account, setAccount] = useState(null);           // null = memeriksa, '' = tautan tidak valid
+    const [linkError, setLinkError] = useState('');
+    const [pw, setPw] = useState('');
+    const [confirm, setConfirm] = useState('');
+    const [loading, setLoad] = useState(false);
+    const [error, setErr] = useState('');
+    const [done, setDone] = useState(false);
+    useEffect(() => {
+        verifyResetToken(token).then(r => setAccount(r.username))
+            .catch(e => { setAccount(''); setLinkError(e?.response?.data?.detail || t('reset.invalid')); });
+    }, [token]);   // eslint-disable-line react-hooks/exhaustive-deps
+    const submit = async (e) => {
+        e.preventDefault();
+        setErr('');
+        if (pw.length < 8) { setErr(t('reset.errShort')); return; }
+        if (pw !== confirm) { setErr(t('reset.errMismatch')); return; }
+        setLoad(true);
+        try { await confirmPasswordReset(token, pw); setDone(true); }
+        catch (e2) { setErr(e2?.response?.data?.detail || t('reset.failed')); }
+        finally { setLoad(false); }
+    };
+    if (account === null) return <div style={{ ...CARD, fontSize: 13, color: 'var(--text2)', textAlign: 'center' }}>{t('reset.checking')}</div>;
+    if (account === '' || done) {
+        return (
+            <div style={{ ...CARD, textAlign: 'center' }}>
+                <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 10, color: done ? 'var(--green)' : 'var(--red)' }}>
+                    {done ? t('reset.doneTitle') : t('reset.invalidTitle')}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 24, lineHeight: 1.7 }}>{done ? t('reset.doneHint') : linkError}</div>
+                <button onClick={onGoLogin} style={submitStyle(false)}>{t('reset.toLogin')}</button>
+            </div>
+        );
+    }
+    return (
+        <div style={CARD}>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{t('reset.title')}</div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 6, lineHeight: 1.6 }}>{t('reset.formHint')}</div>
+            <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 18, fontFamily: 'var(--fmono)' }}>{account}</div>
+            <form onSubmit={submit}>
+                <input type="text" name="username" autoComplete="username" value={account} readOnly hidden />
+                <Input label={t('reset.newPassword')} value={pw} onChange={setPw} type="password" placeholder="••••••••" autoFocus autoComplete="new-password" hasError={!!error} />
+                <Input label={t('reset.confirmPassword')} value={confirm} onChange={setConfirm} type="password" placeholder="••••••••" autoComplete="new-password" hasError={!!error} />
+                <ErrorBox msg={error} />
+                <button type="submit" disabled={loading} style={submitStyle(loading)}>{loading ? t('reset.saving') : t('reset.submit')}</button>
+            </form>
+        </div>
+    );
+}
+
+// Token reset dibaca sekali lalu dihapus dari alamat, supaya tidak tersimpan di riwayat atau terbagi lewat tangkapan layar.
+function readResetToken() {
+    try {
+        const q = new URLSearchParams(window.location.search);
+        const token = q.get('reset');
+        if (token) {
+            q.delete('reset');
+            const rest = q.toString();
+            window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : ''));
+        }
+        return token || '';
+    } catch { return ''; }
 }
 
 // ── Wajib ganti password (setelah direset admin) ────────────────────────────
@@ -377,17 +567,21 @@ function RegisterForm({ onGoLogin }) {
 
 // ── Root export ─────────────────────────────────────────────────────────────
 export default function LoginPage({ onLogin, notice = '' }) {
-    const [mode, setMode] = useState('login');   // 'login' | 'register' | 'forgot'
+    const [resetToken] = useState(readResetToken);
+    const [mode, setMode] = useState(resetToken ? 'reset' : 'login');   // 'login' | 'register' | 'forgot' | 'mfa' | 'reset'
     const [forgotUser, setForgotUser] = useState('');
+    const [challenge, setChallenge] = useState(null);
 
     return (
         <PageShell>
             {mode === 'login' && (
-                <LoginForm onLogin={onLogin} notice={notice} onGoRegister={() => setMode('register')}
+                <LoginForm onLogin={onLogin} onMfa={(c) => { setChallenge(c); setMode('mfa'); }} notice={notice} onGoRegister={() => setMode('register')}
                     onGoForgot={(u) => { setForgotUser(u); setMode('forgot'); }} />
             )}
+            {mode === 'mfa' && challenge && <MfaStep challenge={challenge} onLogin={onLogin} onBack={() => { setChallenge(null); setMode('login'); }} />}
             {mode === 'register' && <RegisterForm onGoLogin={() => setMode('login')} />}
-            {mode === 'forgot' && <ForgotForm initialUsername={forgotUser} onGoLogin={() => setMode('login')} />}
+            {mode === 'forgot' && <ForgotChooser initialUsername={forgotUser} onGoLogin={() => setMode('login')} />}
+            {mode === 'reset' && <ResetForm token={resetToken} onGoLogin={() => setMode('login')} />}
         </PageShell>
     );
 }

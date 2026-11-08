@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+    resetVmLab,
     fetchProxmoxInstances, fetchProxmoxNodes, fetchProxmoxVms, fetchMyProxmoxVms, proxmoxVmAction,
     getGuacUrl, appendGuacToken, applyGuacTouchInputDefault, fetchSshConfig, fetchProxmoxVmIp, fetchMyAssignedVmids, fetchProxmoxVmDetail,
 } from '../api';
@@ -11,6 +12,11 @@ import ProxmoxVmDetailModal from '../components/ProxmoxVmDetailModal';
 import ProxmoxInstancesModal from '../components/ProxmoxInstancesModal';
 import HostPerformancePanel from '../components/HostPerformancePanel';
 import CreateVmModal from '../components/CreateVmModal';
+import VmJobsPanel from '../components/VmJobsPanel';
+import CloudImagesModal from '../components/CloudImagesModal';
+import VmConsoleModal from '../components/VmConsoleModal';
+import ExamBanner from '../components/ExamBanner';
+import { useSysConfig } from '../sysconfig';
 import BulkVmModal from '../components/BulkVmModal';
 import ProxmoxResizeModal from '../components/ProxmoxResizeModal';
 import { cloudInitDefaults } from '../proxmoxCloudInit';
@@ -67,6 +73,9 @@ export default function ProxmoxPage({ currentUser }) {
     const pollRef = useRef(null);
     const [resizeVm, setResizeVm] = useState(null);       // vm sedang dibuka modal resize-nya (admin)
     const [snapshotVm, setSnapshotVm] = useState(null);   // vm sedang dibuka modal snapshot-nya
+    const [showImages, setShowImages] = useState(false);   // template dari cloud image (admin)
+    const [showJobs, setShowJobs] = useState(false);       // riwayat pembuatan VM di latar belakang (admin)
+    const [consoleVm, setConsoleVm] = useState(null);      // vm yang konsolnya dibuka (admin)
     const [credsVm, setCredsVm] = useState(null);          // vm sedang dibuka modal credentials-nya
     const [detailVm, setDetailVm] = useState(null);        // vm sedang dibuka modal detail-nya
     const [showCreate, setShowCreate] = useState(false);
@@ -74,6 +83,8 @@ export default function ProxmoxPage({ currentUser }) {
     const [connecting, setConnecting] = useState(null);    // vmKey VM yang sedang proses connect
 
     const canControl = ['superadmin', 'sysadmin'].includes(currentUser?.role);
+    const sysCfg = useSysConfig();
+    const [examLive, setExamLive] = useState(false);          // ujian kelas mahasiswa sedang berlangsung
     const isMobile = useIsMobile();
     const t = useT();
     const [sshCfg, setSshCfg] = useState(null);     // konfigurasi bastion SSH (null = belum dimuat)
@@ -207,6 +218,21 @@ export default function ProxmoxPage({ currentUser }) {
         }
     };
 
+    const doReset = async (vm) => {
+        if (!window.confirm(t('lab.studentResetConfirm', { name: vm.name }))) return;
+        setPendingAction(vmKey(vm));
+        try {
+            const c = ctx(vm);
+            await resetVmLab(c.instance, c.node, vm.vmid);
+            setNotice(t('lab.resetDone'));
+            setTimeout(refresh, 1500);
+        } catch (e) {
+            setError(e?.response?.data?.detail || t('lab.studentReset'));
+        } finally {
+            setPendingAction(null);
+        }
+    };
+
     const doConnect = async (vm) => {
         setConnecting(vmKey(vm));
         setError(null);
@@ -259,6 +285,18 @@ export default function ProxmoxPage({ currentUser }) {
                         {pendingAction === key ? '…' : t(a.label)}
                     </button>
                 ))}
+                {!canControl && sysCfg.lab_reset_students && !examLive && canControlVm(vm) && (
+                    <button disabled={pendingAction === key} onClick={() => doReset(vm)} title={t('lab.studentResetHint')}
+                        style={{ ...btnSize, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--yellow)', color: 'var(--yellow)' }}>
+                        {t('lab.studentReset')}
+                    </button>
+                )}
+                {canControl && vm.status === 'running' && (
+                    <button onClick={() => setConsoleVm(vm)} title={t('console.openHint')}
+                        style={{ ...btnSize, borderRadius: 5, cursor: 'pointer', background: 'transparent', border: '1px solid var(--text3)', color: 'var(--text2)' }}>
+                        {t('console.open')}
+                    </button>
+                )}
                 {canControl && (
                     <button disabled={vm.status !== 'stopped'} onClick={() => setResizeVm(vm)}
                         title={vm.status !== 'stopped' ? t('servers.resizeNeedsStop') : t('servers.resizeHint')}
@@ -350,6 +388,18 @@ export default function ProxmoxPage({ currentUser }) {
                         </button>
                     )}
                     {canControl && selectedInstance && selectedNode && (
+                        <button onClick={() => setShowImages(true)}
+                            style={{ padding: '6px 12px', fontSize: 11, borderRadius: 6, cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)' }}>
+                            {t('images.button')}
+                        </button>
+                    )}
+                    {canControl && (
+                        <button onClick={() => setShowJobs(true)}
+                            style={{ padding: '6px 12px', fontSize: 11, borderRadius: 6, cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)' }}>
+                            {t('jobs.button')}
+                        </button>
+                    )}
+                    {canControl && selectedInstance && selectedNode && (
                         <button onClick={() => setShowBulk(true)}
                             style={{ padding: '6px 12px', fontSize: 11, borderRadius: 6, cursor: 'pointer', background: 'var(--cyan-glow)', border: '1px solid var(--cyan)', color: 'var(--cyan)' }}>
                             {t('servers.bulk')}
@@ -369,6 +419,8 @@ export default function ProxmoxPage({ currentUser }) {
                     ⚠ {error}
                 </div>
             )}
+
+            {!canControl && <ExamBanner onLiveChange={setExamLive} />}
 
             {notice && (
                 <div style={{ background: '#4ade8012', border: '1px solid #4ade8055', borderRadius: 8, padding: '8px 14px', color: '#4ade80', fontSize: 11, marginBottom: 14, display: 'flex', justifyContent: 'space-between', gap: 10 }}>
@@ -451,6 +503,7 @@ export default function ProxmoxPage({ currentUser }) {
                                         style={{ background: 'transparent', border: 'none', padding: 0, color: 'var(--text)', cursor: 'pointer', textDecoration: 'underline', textDecorationColor: 'var(--border-light)', fontSize: 12 }}>
                                         {vm.name || '—'}
                                     </button>
+                                    {vm.locked && <span title={t('lock.badgeHint')} style={{ marginLeft: 6, fontSize: 10, color: 'var(--yellow)' }}>🔒 {t('lock.badge')}</span>}{vm.scheduled && <span title={t('sched.badge')} style={{ marginLeft: 6, fontSize: 10, color: 'var(--cyan)' }}>⏱</span>}
                                 </td>
                                 <td style={{ padding: '8px 12px' }}>
                                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: STATUS_COLOR[vm.status] || 'var(--text3)' }}>
@@ -539,7 +592,15 @@ export default function ProxmoxPage({ currentUser }) {
                     node={selectedNode}
                     onClose={() => setShowCreate(false)}
                     onCreated={() => loadVms(selectedInstance, selectedNode)}
+                    onBackground={(job) => { setNotice(t('jobs.started', { id: job.id, name: job.name })); setShowJobs(true); }}
                 />
+            )}
+
+            {showJobs && <VmJobsPanel onClose={() => setShowJobs(false)} />}
+            {showImages && <CloudImagesModal instance={selectedInstance} node={selectedNode} onClose={() => setShowImages(false)} />}
+            {consoleVm && (
+                <VmConsoleModal instance={ctx(consoleVm).instance} node={ctx(consoleVm).node} vmid={consoleVm.vmid}
+                    vmName={consoleVm.name} onClose={() => setConsoleVm(null)} />
             )}
 
             {detailVm && (

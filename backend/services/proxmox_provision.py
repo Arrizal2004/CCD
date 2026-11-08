@@ -102,7 +102,12 @@ def parse_dns(dns: str | None) -> str | None:
 async def create_from_template(client, node: str, *, template_vmid: int, name: str, username: str,
                                password: str, ip_mode: str, ip_cidr: str | None, gateway: str | None,
                                dns: str | None, cores: int | None, memory_mb: int | None,
-                               disk_gb: int | None, bridge: str | None, full_clone: bool, start: bool) -> dict:
+                               disk_gb: int | None, bridge: str | None, full_clone: bool, start: bool,
+                               progress=None) -> dict:
+    async def step(name_: str) -> None:
+        if progress:
+            await progress(name_)
+
     if not NAME_RE.match(name):
         raise ProvisionError(tr("Nama VM/hostname hanya huruf, angka, dan '-' (maks. 63, tidak diawali/diakhiri '-')",
                                 "The VM name/hostname may only contain letters, digits and '-' (max 63, not starting or ending with '-')"))
@@ -152,9 +157,11 @@ async def create_from_template(client, node: str, *, template_vmid: int, name: s
             if "already exists" in e.detail and attempt < 2:
                 continue
             raise
+    await step("clone_wait")
     await client.wait_task(node, upid, timeout=900)
     log.info("Cloned template %s → VM %s (%s, %s clone)", template_vmid, vmid, name, "full" if full_clone else "linked")
 
+    await step("configure")
     try:
         config = {"ciuser": username, "cipassword": password, "ipconfig0": ipconfig, "ciupgrade": 0}
         if nameserver:
@@ -171,6 +178,7 @@ async def create_from_template(client, node: str, *, template_vmid: int, name: s
         if disk_gb and tpl["disk_key"] and tpl["disk_gb"] and disk_gb > tpl["disk_gb"]:
             await client.resize_disk(node, vmid, tpl["disk_key"], f"{disk_gb}G")
         if start:
+            await step("start")
             await client.wait_task(node, await client.vm_action(node, vmid, "start"), timeout=120)
     except Exception as e:
         detail = e.detail if isinstance(e, ProxmoxError) else str(e)

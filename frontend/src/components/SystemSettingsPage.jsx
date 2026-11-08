@@ -7,6 +7,10 @@ import Clock from './Clock';
 import { formatBytes } from '../format';
 import BrandLogo from './BrandLogo';
 import AnnouncementBanner from './AnnouncementBanner';
+import MfaPolicyCard from './MfaPolicyCard';
+import EmailSettingsCard from './EmailSettingsCard';
+import QuotaDefaultsCard from './QuotaDefaultsCard';
+import LabSettingsCard from './LabSettingsCard';
 
 // Pengaturan Sistem (superadmin): identitas, tampilan, bahasa, zona waktu, pengumuman, aturan pendaftaran,
 // nilai bawaan, lama penyimpanan log audit, dan alamat SSH, supaya setiap sekolah atau kampus bisa
@@ -333,6 +337,11 @@ export default function SystemSettingsPage() {
                     })}
                 </div>
             </div>
+
+            <MfaPolicyCard />
+            <EmailSettingsCard />
+            <QuotaDefaultsCard />
+            <LabSettingsCard />
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                 <button onClick={save} disabled={saving}

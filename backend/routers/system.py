@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from fastapi.responses import Response
 
 from auth import get_current_user, require_superadmin
-from services import system_settings as ss
+from services import lab_reset, system_settings as ss
 from services.audit import both, log_activity
 from i18n import tr
 
@@ -33,7 +33,8 @@ async def config(user: dict = Depends(get_current_user)):
     s = await ss.get_settings()
     return {"announcement": ss.active_announcement(s), "default_vm_lease_days": s["default_vm_lease_days"],
             "ticket_categories": s["ticket_categories"], "vps_os_options": s["vps_os_options"],
-            "os_logos": _os_logo_map(s), "timezone": s["timezone"]}
+            "os_logos": _os_logo_map(s), "timezone": s["timezone"],
+            "lab_reset_students": (await lab_reset.get_settings())["students_can_reset"]}
 
 
 def _os_logo_map(s: dict) -> dict:
@@ -198,3 +199,54 @@ async def delete_logo(request: Request, user: dict = Depends(require_superadmin)
     await log_activity(user, "SYSTEM_LOGO_UPDATE", "WARNING", {"id": "system", "name": s["name"]},
                        both(lambda: tr(f"{user.get('username')} menghapus logo sistem", f"{user.get('username')} removed the system logo")), request)
     return {"logo_version": None}
+
+
+# ── Email (SMTP) ──────────────────────────────────────────────────────────────
+class EmailTestBody(BaseModel):
+    to: str
+
+
+@router.get("/email")
+async def get_email(user: dict = Depends(require_superadmin)):
+    from services import mailer
+    return mailer.public_view(await mailer.get_config())
+
+
+@router.put("/email")
+async def put_email(body: dict, request: Request, user: dict = Depends(require_superadmin)):
+    from services import mailer
+    cfg = await mailer.save(body, user.get("username") or "")
+    await log_activity(user, "EMAIL_SETTINGS", "WARNING", None,
+                       both(lambda: tr("Pengaturan email (SMTP) diubah dan diaktifkan", "The email (SMTP) settings were changed and turned on")
+                            if cfg["smtp"]["enabled"] else tr("Pengaturan email (SMTP) diubah", "The email (SMTP) settings were changed")),
+                       request)
+    return mailer.public_view(cfg)
+
+
+@router.post("/email/test")
+async def test_email(body: EmailTestBody, request: Request, user: dict = Depends(require_superadmin)):
+    """Kirim email uji langsung (bukan lewat antrean), supaya galat SMTP terlihat saat itu juga."""
+    from services import mailer
+    cfg = await mailer.get_config()
+    if not cfg["smtp"]["host"] or not cfg["smtp"]["from_address"]:
+        raise HTTPException(400, tr("Isi server SMTP dan alamat pengirim dulu", "Fill in the SMTP server and sender address first"))
+    if not mailer.valid_address(body.to):
+        raise HTTPException(400, tr("Alamat email tujuan tidak valid", "The recipient address is not valid"))
+    brand = (await ss.get_settings()).get("name") or "CCD"
+    text, html_body = mailer.render(brand, tr("Email uji", "Test email"),
+                                    [tr("Email ini dikirim dari Pengaturan Sistem untuk memastikan SMTP bekerja.",
+                                        "This email was sent from System settings to confirm that SMTP works.")])
+    try:
+        await mailer.send_now(cfg, body.to.strip(), tr("Email uji dari dashboard", "Test email from the dashboard"), text, html_body)
+    except Exception as e:
+        raise HTTPException(502, tr(f"Gagal mengirim: {type(e).__name__}: {str(e)[:200]}",
+                                    f"Sending failed: {type(e).__name__}: {str(e)[:200]}"))
+    await log_activity(user, "EMAIL_TEST", "INFO", None,
+                       both(lambda: tr("Email uji dikirim", "A test email was sent")), request)
+    return {"ok": True}
+
+
+@router.get("/email/outbox")
+async def email_outbox(user: dict = Depends(require_superadmin)):
+    from services import mailer
+    return await mailer.recent()

@@ -6,6 +6,8 @@ import {
     fetchUsers, fetchAllProxmoxVmsFlat,
 } from '../api';
 import useIsMobile from '../useIsMobile';
+import QuotaModal from './QuotaModal';
+import { ExamsPanel, LabResetPanel, UsageReportPanel } from './GroupLabPanel';
 import { useT } from '../i18n';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -429,9 +431,10 @@ export default function GroupsPage() {
     const [allVms, setAllVms] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedId, setSelectedId] = useState(null);
-    const [activePanel, setActivePanel] = useState('members'); // 'members' | 'vms'
+    const [activePanel, setActivePanel] = useState('members'); // 'members' | 'vms' | 'lab' | 'exams' | 'report'
     const [showForm, setShowForm] = useState(false);
     const [editTarget, setEditTarget] = useState(null);
+    const [quotaOf, setQuotaOf] = useState(null);       // grup yang kuotanya sedang diatur
     const [err, setErr] = useState('');
     // Di HP daftar grup dan detailnya bergantian memenuhi layar, bukan berdampingan.
     const isMobile = useIsMobile();
@@ -529,6 +532,9 @@ export default function GroupsPage() {
                                             {g.name}
                                         </div>
                                         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                            <button onClick={e => { e.stopPropagation(); setQuotaOf(g); }}
+                                                title={t('quota.title')} aria-label={t('quota.title')}
+                                                style={{ ...btnSt('var(--text3)'), padding: '2px 7px', fontSize: 10 }}>{t('quota.button')}</button>
                                             <button onClick={e => { e.stopPropagation(); setEditTarget(g); setShowForm(false); }}
                                                 title={t('groups.edit')} aria-label={t('groups.edit')}
                                                 style={{ ...btnSt('var(--text3)'), padding: '2px 7px', fontSize: 10 }}>✎</button>
@@ -579,7 +585,7 @@ export default function GroupsPage() {
 
                         {/* Panel tabs */}
                         <div style={{ display: 'flex', gap: 6 }}>
-                            {[['members', t('groups.tabMembers')], ['vms', t('groups.tabVms')]].map(([id, label]) => (
+                            {[['members', t('groups.tabMembers')], ['vms', t('groups.tabVms')], ['lab', t('lab.tab')], ['exams', t('lab.examsTab')], ['report', t('lab.reportTab')]].map(([id, label]) => (
                                 <button key={id} onClick={() => setActivePanel(id)} style={{
                                     padding: '5px 14px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
                                     background: activePanel === id ? 'var(--bg-hover)' : 'transparent',
@@ -590,16 +596,17 @@ export default function GroupsPage() {
                         </div>
 
                         <div style={{ padding: isMobile ? 12 : 14, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8 }}>
-                            {activePanel === 'members' ? (
-                                <MembersPanel group={selected} allStudents={allStudents} />
-                            ) : (
-                                <VmAccessPanel group={selected} allVms={allVms} />
-                            )}
+                            {activePanel === 'members' && <MembersPanel group={selected} allStudents={allStudents} />}
+                            {activePanel === 'vms' && <VmAccessPanel group={selected} allVms={allVms} />}
+                            {activePanel === 'lab' && <LabResetPanel key={selected.id} group={selected} />}
+                            {activePanel === 'exams' && <ExamsPanel key={selected.id} group={selected} />}
+                            {activePanel === 'report' && <UsageReportPanel key={selected.id} group={selected} />}
                         </div>
                     </div>
                 )}
             </div>
             )}
+            {quotaOf && <QuotaModal kind="group" id={quotaOf.id} name={quotaOf.name} onClose={() => setQuotaOf(null)} />}
         </div>
     );
 }

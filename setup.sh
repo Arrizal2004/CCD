@@ -9,7 +9,7 @@
 #   2. Siapkan backend/.env — kalau belum ada, dibuat dari .env.example dengan
 #      secret ter-generate otomatis (openssl rand). Kalau sudah ada, dipakai
 #      apa adanya, tidak ditimpa.
-#   3. Cek port 80 kosong, bangun image satu per satu (hemat memori), jalankan, tunggu backend siap.
+#   3. Cek port dashboard (FRONTEND_PORT, bawaan 80) kosong, bangun image satu per satu (hemat memori), jalankan, tunggu backend siap.
 #   4. Cetak ringkasan akses + langkah berikutnya.
 #
 # Setelah ini selesai, ikuti docs/PANDUAN_DEPLOYMENT.md mulai Bagian 2 untuk
@@ -159,7 +159,11 @@ setup_env() {
     sed -i "s#^JWT_SECRET=.*#JWT_SECRET=${jwt_secret}#"           "$env_file"
     sed -i "s#^AGENT_ENC_SECRET=.*#AGENT_ENC_SECRET=${agent_secret}#" "$env_file"
     sed -i "s#^GUAC_ADMIN_PASS=.*#GUAC_ADMIN_PASS=${guac_pass}#"   "$env_file"
-    sed -i "s#^ALLOWED_ORIGINS=.*#ALLOWED_ORIGINS=http://${DETECTED_HOST}#" "$env_file"
+    local port="${FRONTEND_PORT:-80}" origin
+    case "$port" in ''|*[!0-9]*) err "FRONTEND_PORT harus berupa angka (dapat: '$port')."; exit 1 ;; esac
+    sed -i "s#^FRONTEND_PORT=.*#FRONTEND_PORT=${port}#" "$env_file"
+    if [ "$port" = "80" ]; then origin="http://${DETECTED_HOST}"; else origin="http://${DETECTED_HOST}:${port}"; fi
+    sed -i "s#^ALLOWED_ORIGINS=.*#ALLOWED_ORIGINS=${origin}#" "$env_file"
 
     local admin_pass
     admin_pass="$(gen_password)"
@@ -175,17 +179,26 @@ setup_env() {
     log "backend/.env dibuat. Secret di-generate otomatis (openssl rand) — tidak perlu diisi manual."
 }
 
+frontend_port() {
+    local p
+    p="$(grep -E '^FRONTEND_PORT=' "$BACKEND_DIR/.env" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]')"
+    echo "${p:-80}"
+}
+
 check_port80() {
-    # Dashboard dilayani di port 80. Kalau port itu sudah dipakai aplikasi lain (Apache, nginx
+    # Dashboard dilayani di FRONTEND_PORT (bawaan 80). Kalau port itu sudah dipakai aplikasi lain (Apache, nginx
     # bawaan OS, dsb.), container frontend gagal start — hentikan di sini dengan pesan yang jelas.
+    local port
+    port="$(frontend_port)"
     command -v ss >/dev/null 2>&1 || return 0
     if $SUDO docker ps --format '{{.Names}}' 2>/dev/null | grep -qx ccd-frontend; then
         return 0   # sudah dipakai dashboard ini sendiri (redeploy)
     fi
-    if [ -n "$(ss -ltnH 'sport = :80' 2>/dev/null)" ]; then
-        err "Port 80 sudah dipakai proses lain:"
-        $SUDO ss -ltnp 'sport = :80' >&2 || true
-        err "Hentikan proses itu dulu (mis. 'sudo systemctl disable --now apache2' atau nginx), lalu jalankan ulang ./setup.sh."
+    if [ -n "$(ss -ltnH "sport = :${port}" 2>/dev/null)" ]; then
+        err "Port ${port} sudah dipakai proses lain:"
+        $SUDO ss -ltnp "sport = :${port}" >&2 || true
+        err "Hentikan proses itu dulu (mis. 'sudo systemctl disable --now apache2' atau nginx), atau pakai port lain:"
+        err "  FRONTEND_PORT=8080 ./setup.sh   (atau ubah FRONTEND_PORT di backend/.env lalu jalankan ulang)"
         exit 1
     fi
 }
@@ -271,7 +284,8 @@ main() {
     echo
     log "========================================================"
     log " Selesai."
-    log " Dashboard : http://${DETECTED_HOST}"
+    local shown_port; shown_port="$(frontend_port)"
+    log " Dashboard : http://${DETECTED_HOST}$([ "$shown_port" = "80" ] || echo ":${shown_port}")"
     if [ -n "$GENERATED_ADMIN_PASS" ]; then
         log " Login awal: admin / ${GENERATED_ADMIN_PASS}  (SIMPAN INI, tersimpan juga di backend/.env → INITIAL_ADMIN_PASSWORD)"
     else

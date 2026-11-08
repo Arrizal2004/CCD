@@ -227,7 +227,15 @@ pveum acl modify /sdn/zones/<nama-zone>/<bridge> --tokens 'root@pam!ccd-dashboar
 
 # Kalau mau tampilkan panel "Host Performance" (CPU/RAM/Disk/Network live) di dashboard utama (hanya tampil untuk admin)
 pveum acl modify /nodes/<nama-node> --tokens 'root@pam!ccd-dashboard' --roles PVEAuditor
+
+# Kalau mau memakai "Template dari image" (Ubuntu / openSUSE): node harus boleh mengunduh image, dan storage
+# unduhan butuh konten "Import" (detail dan daftar izin per path di docs/CLOUD_IMAGES.md)
+pveum role add CCDImage --privs "Sys.AccessNetwork"
+pveum acl modify /nodes/<nama-node> --tokens 'root@pam!ccd-dashboard' --roles CCDImage
+pveum acl modify /storage/<storage-import> --tokens 'root@pam!ccd-dashboard' --roles PVEDatastoreAdmin
 ```
+
+Peran `PVEAdmin` di pool sudah mencakup izin yang dipakai fitur kunci VM (`VM.Config.Options`), konsol VM (`VM.Console`), snapshot dan rollback (`VM.Snapshot`, `VM.Snapshot.Rollback`) yang dibutuhkan reset lab, jadwal VM, dan mode ujian. Kalau Anda memakai peran yang lebih sempit, tambahkan izin itu.
 
 Verifikasi ACL sudah terpasang:
 ```bash

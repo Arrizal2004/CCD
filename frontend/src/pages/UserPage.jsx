@@ -1,6 +1,7 @@
+import QuotaModal from '../components/QuotaModal';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchUsers, createUser, updateUser, deleteUserApi, fetchUserAssignments, fetchGroups, bulkUsers, importUsers,
-    resetUserPassword, fetchPasswordHelp, dismissPasswordHelp } from '../api';
+    resetUserPassword, fetchPasswordHelp, dismissPasswordHelp, resetUserMfa } from '../api';
 import { leaseInfo } from '../format';
 import { locale, tNodes, useT } from '../i18n';
 import { parseCsv, CSV_TEMPLATE, credentialsCsv } from '../csv';
@@ -388,6 +389,7 @@ export default function UsersPage({ currentUser }) {
     const [sort, setSort]                 = useState({ col: 'role', dir: 'asc' });
     const [editUser, setEditUser]         = useState(null);
     const [activityOf, setActivityOf]     = useState('');
+    const [quotaOf, setQuotaOf]           = useState(null);   // mahasiswa yang kuotanya sedang diatur
     const [instancesOf, setInstancesOf]   = useState(null);   // sysadmin yang Proxmox-nya sedang diatur
     const [showNew, setShowNew]           = useState(false);
     const [confirmDlg, setConfirmDlg]     = useState(null); // { type, user }
@@ -483,6 +485,13 @@ export default function UsersPage({ currentUser }) {
             helpChanged();
             await loadUsers();
         } catch (e) { setActionErr(e?.response?.data?.detail || e.message); }
+    };
+
+    const doResetMfa = async (u) => {
+        if (!confirm(t('mfa.adminResetConfirm', { name: u.username }))) return;
+        setActionErr('');
+        try { await resetUserMfa(u.id); await loadUsers(); }
+        catch (e) { setActionErr(e?.response?.data?.detail || e.message); }
     };
 
     const doDismissHelp = async (r) => {
@@ -737,6 +746,18 @@ export default function UsersPage({ currentUser }) {
                                                 style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer', marginBottom: 5, whiteSpace: 'nowrap' }}>
                                                 {t('uact.button')}
                                             </button>
+                                            {u.role === 'student' && (
+                                                <button onClick={() => setQuotaOf(u)} title={t('quota.title')}
+                                                    style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text2)', cursor: 'pointer', marginBottom: 5, marginLeft: 5, whiteSpace: 'nowrap' }}>
+                                                    {t('quota.button')}
+                                                </button>
+                                            )}
+                                            {isAdmin && u.mfa_enabled && canReset(u) && (
+                                                <button onClick={() => doResetMfa(u)} title={t('mfa.adminResetTitle')}
+                                                    style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--yellow)66', color: 'var(--yellow)', cursor: 'pointer', marginBottom: 5, marginLeft: 5, whiteSpace: 'nowrap' }}>
+                                                    {t('mfa.adminReset')}
+                                                </button>
+                                            )}
                                             {canReset(u) && !isSuperAdmin && (
                                                 <button onClick={() => setConfirmDlg({ type: 'reset', user: u })} style={{ padding: '3px 10px', borderRadius: 4, fontSize: 11, background: 'transparent', border: '1px solid var(--cyan)66', color: 'var(--cyan)', cursor: 'pointer', whiteSpace: 'nowrap' }}>{t('users.resetBtn')}</button>
                                             )}
@@ -812,6 +833,7 @@ export default function UsersPage({ currentUser }) {
             {instancesOf && <UserInstancesModal user={instancesOf} onClose={() => setInstancesOf(null)} onSaved={loadUsers} />}
             {resetResult && <ResetResultModal result={resetResult} onClose={() => setResetResult(null)} />}
             {activityOf && <UserActivityModal username={activityOf} onClose={() => setActivityOf('')} />}
+            {quotaOf && <QuotaModal kind="user" id={quotaOf.id} name={quotaOf.username} onClose={() => setQuotaOf(null)} />}
 
             {confirmDlg?.type === 'verify' && (
                 <ConfirmDialog

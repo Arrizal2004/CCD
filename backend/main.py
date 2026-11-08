@@ -39,7 +39,7 @@ from auth import require_superadmin
 from i18n import LanguageMiddleware
 from routers import vm_metadata, users
 from routers import ssh_creds, linux_vm, terminal, metrics_ws, admin, tickets
-from routers import infra_requests, groups, guac, proxmox, openweb, ssh_keys, system, networks, vm_batches
+from routers import infra_requests, groups, guac, proxmox, openweb, ssh_keys, system, networks, vm_batches, vm_ops, quotas, vm_jobs, console, images, lab
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 redis_client: aioredis.Redis = None
@@ -54,6 +54,8 @@ async def lifespan(app: FastAPI):
     app.state.redis_raw = redis_client          # plain client untuk healthz ping
     import token_blocklist
     token_blocklist.set_redis(redis_client)
+    from services import onetime
+    onetime.set_redis(redis_client)
     from services import login_rate_limit
     login_rate_limit.set_redis(redis_client)
     from services import ssh_kill
@@ -82,8 +84,15 @@ async def lifespan(app: FastAPI):
     vps_task = asyncio.create_task(run_vps_sampler())
     from services.lifecycle import run_lifecycle_job
     lifecycle_task = asyncio.create_task(run_lifecycle_job())
+    from services.mailer import run_worker as run_email_worker
+    email_task = asyncio.create_task(run_email_worker())
     from services.vm_batches import recover_interrupted
     await recover_interrupted()     # VM massal yang terputus saat backend mati bisa dilanjutkan dari halaman
+    from services import vm_jobs as vm_jobs_service
+    await vm_jobs_service.recover_interrupted()
+    from services import cloud_images, lab_reset
+    await cloud_images.recover_interrupted()
+    await lab_reset.recover_interrupted()
 
     yield
 
@@ -93,6 +102,7 @@ async def lifespan(app: FastAPI):
     iops_task.cancel()
     vps_task.cancel()
     lifecycle_task.cancel()
+    email_task.cancel()
     from services.ssh_client import close_all_pooled
     await close_all_pooled()   # tutup semua koneksi SSH pool (anti zombie)
     await redis_client.aclose()
@@ -140,6 +150,12 @@ app.include_router(infra_requests.router, prefix="/api/v1/infra-requests",    ta
 app.include_router(groups.router,         prefix="/api/v1/groups",             tags=["Groups"])
 app.include_router(guac.router,           prefix="/ws/guac",                   tags=["Guacamole WS"])
 app.include_router(proxmox.router,        prefix="/api/v1/proxmox",            tags=["Proxmox"])
+app.include_router(vm_ops.router,         prefix="/api/v1/proxmox",            tags=["VM Operations"])
+app.include_router(lab.router,            prefix="/api/v1/lab",                tags=["Lab, Exams, Reports"])
+app.include_router(images.router,         prefix="/api/v1/images",             tags=["Cloud Images"])
+app.include_router(console.router,        prefix="/ws/console",                tags=["Console WS"])
+app.include_router(quotas.router,         prefix="/api/v1/quotas",             tags=["Quotas"])
+app.include_router(vm_jobs.router,        prefix="/api/v1/vm-jobs",            tags=["VM Jobs"])
 app.include_router(openweb.router,         prefix="/api/v1/openweb",             tags=["Open Web"])
 app.include_router(system.router,          prefix="/api/v1/system",              tags=["System"])
 app.include_router(ssh_keys.router,        prefix="/api/v1/ssh-keys",            tags=["SSH Keys"])
