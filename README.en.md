@@ -32,7 +32,7 @@ A student signs in, sees the VMs assigned to them, and clicks **Connect**. An SS
 - Account security: two-step verification (TOTP) with recovery codes, which can be required for admins or for everyone; self-service password reset through an emailed link (SMTP, optional) next to the admin reset. See [docs/AKUN_DAN_EMAIL.md](docs/AKUN_DAN_EMAIL.md) (Indonesian).
 - VM operations for admins: schedules that start, shut down or snapshot a VM on chosen days and times; VM lock (Proxmox Protection) against accidental deletion; a browser VM console (noVNC); background VM creation with a history and a Retry button.
 - Per-student quotas (number of VMs, vCPU, RAM, disk), resolved user → group → system default and checked when a VM is assigned.
-- Automatic templates from official cloud images (Ubuntu 24.04 LTS and openSUSE Leap 16.0) that show up in Create VM right away. See [docs/CLOUD_IMAGES.md](docs/CLOUD_IMAGES.md) (Indonesian).
+- Automatic templates from official cloud images (Ubuntu 24.04 LTS, openSUSE Leap 16.0 and 16.1) that show up in Create VM right away. See [docs/CLOUD_IMAGES.md](docs/CLOUD_IMAGES.md) (Indonesian).
 - Class features: lab reset to a baseline (one VM or a whole class), exam mode (time window, exam VMs only, no VM changes) and a per-class usage report (sessions, minutes, active days, CSV). See [docs/KELAS_DAN_UJIAN.md](docs/KELAS_DAN_UJIAN.md) (Indonesian).
 - Outgoing email: VM lease warnings and password reset links through an SMTP queue with retries.
 - Audit & Remote:

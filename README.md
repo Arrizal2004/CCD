@@ -30,7 +30,7 @@ Mahasiswa login, melihat VM yang ditugaskan kepadanya, lalu klik **Connect**. Se
 - Keamanan akun: verifikasi 2 langkah (TOTP) dengan kode pemulihan, bisa diwajibkan untuk admin atau semua pengguna; reset password mandiri lewat tautan email (SMTP, opsional) selain lewat admin. Lihat [docs/AKUN_DAN_EMAIL.md](docs/AKUN_DAN_EMAIL.md).
 - Operasi VM untuk admin: jadwal nyala, mati, dan snapshot otomatis per hari dan jam; kunci VM (Protection Proxmox) supaya tidak terhapus tidak sengaja; konsol VM (noVNC) di browser; pembuatan VM di latar belakang dengan riwayat dan tombol Ulangi.
 - Kuota per mahasiswa (jumlah VM, vCPU, RAM, disk) dengan urutan pengguna, grup, lalu bawaan sistem; dicek saat VM di-assign.
-- Template otomatis dari cloud image resmi (Ubuntu 24.04 LTS dan openSUSE Leap 16.0), langsung muncul di Create VM. Lihat [docs/CLOUD_IMAGES.md](docs/CLOUD_IMAGES.md).
+- Template otomatis dari cloud image resmi (Ubuntu 24.04 LTS, openSUSE Leap 16.0 dan 16.1), langsung muncul di Create VM. Lihat [docs/CLOUD_IMAGES.md](docs/CLOUD_IMAGES.md).
 - Fitur kelas: reset lab ke kondisi awal (satu VM atau seluruh kelas), mode ujian (jendela waktu, VM ujian saja, tanpa perubahan VM), dan laporan pemakaian per kelas (sesi, menit, hari aktif, CSV). Lihat [docs/KELAS_DAN_UJIAN.md](docs/KELAS_DAN_UJIAN.md).
 - Email keluar: peringatan masa sewa VM dan tautan reset password lewat antrean SMTP dengan percobaan ulang.
 - Audit & Remote:

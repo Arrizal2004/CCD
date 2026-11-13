@@ -8,8 +8,9 @@ Membuat template VM dari image resmi tanpa langkah manual di Proxmox. Dari halam
 |---|---|---|
 | Ubuntu Server 24.04 LTS | **tidak ada** di image | `ubuntu` |
 | openSUSE Leap 16.0 (Minimal-VM Cloud) | ada | diatur saat Create VM (cloud-init) |
+| openSUSE Leap 16.1 (Minimal-VM Cloud) | ada | diatur saat Create VM (cloud-init) |
 
-Hanya dua image ini, satu per distro, supaya mudah dipelihara. Checksum dibaca dari berkas checksum resmi dan diperiksa Proxmox saat mengunduh; semua URL memakai HTTPS.
+Hanya tiga image ini supaya mudah dipelihara. Leap 16.0 sudah lebih lama dipakai; Leap 16.1 (rilis November 2026) membawa mode immutable dan kernel yang lebih baru. Untuk praktikum yang mengutamakan kestabilan, mulai dari 16.0. Checksum dibaca dari berkas checksum resmi dan diperiksa Proxmox saat mengunduh; semua URL memakai HTTPS.
 
 > **Ubuntu tidak membawa qemu-guest-agent.** Akibatnya IP DHCP VM dari template ini tidak terdeteksi. Buat VM dengan **IP statis** atau lewat **switch CCD**, atau pasang `qemu-guest-agent` sendiri lalu buat ulang template. Dashboard menampilkan peringatan ini di hasil proses.
 

@@ -1,5 +1,5 @@
 """
-Template otomatis dari cloud image (Ubuntu 24.04 dan openSUSE Leap 16.0), khusus admin. Lihat services/cloud_images.py.
+Template otomatis dari cloud image (Ubuntu 24.04, openSUSE Leap 16.0 dan 16.1), khusus admin. Lihat services/cloud_images.py.
 
   GET    /api/v1/images/catalog           daftar image yang tersedia
   GET    /api/v1/images/options           storage, pool, bridge, dan kesiapan satu node (?instance=&node=)

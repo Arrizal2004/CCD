@@ -44,9 +44,9 @@ def _wait(client, token, job_id):
 
 # ── unit ──────────────────────────────────────────────────────────────────────
 
-def test_catalog_has_exactly_one_ubuntu_and_one_opensuse():
+def test_catalog_is_small_and_fixed():
     keys = [i["key"] for i in ci.CATALOG]
-    assert keys == ["ubuntu-2404", "opensuse-leap-160"]
+    assert keys == ["ubuntu-2404", "opensuse-leap-160", "opensuse-leap-161"]
     assert all(i["url"].startswith("https://") and i["checksum_url"].startswith("https://") for i in ci.CATALOG)
 
 
@@ -89,7 +89,7 @@ def test_validate_options():
 def test_catalog_and_options_endpoints(client, image_pve, sysadmin_token, student_token):
     assert client.get(f"{I}/catalog", headers=auth(student_token)).status_code == 403
     cat = client.get(f"{I}/catalog", headers=auth(sysadmin_token)).json()
-    assert [c["key"] for c in cat] == ["ubuntu-2404", "opensuse-leap-160"] and "checksum_url" not in cat[0]
+    assert [c["key"] for c in cat] == ["ubuntu-2404", "opensuse-leap-160", "opensuse-leap-161"] and "checksum_url" not in cat[0]
     opt = client.get(f"{I}/options", params={"instance": "labImg", "node": "pve"}, headers=auth(sysadmin_token)).json()
     assert opt["version_ok"] and opt["version"] == "9.1" and opt["pools"] == ["lab"] and opt["bridges"] == ["vmbr0"]
     assert [s["storage"] for s in opt["import_storages"]] == ["local", "local-lvm"]
@@ -112,6 +112,14 @@ def test_happy_path_builds_a_template(client, image_pve, sysadmin_token):
     assert cfg["template"] == "1" and cfg["ide2"] == "local-lvm:cloudinit" and cfg["agent"] == "1" and cfg["pool"] == "lab"
     assert ("resize", job["vmid"], "16G") in image_pve.calls                          # disk diperbesar sesuai permintaan
     assert vm["name"] == "tpl-ubuntu"
+
+
+def test_opensuse_161_uses_its_own_image_and_checksum(client, image_pve, sysadmin_token):
+    job = _wait(client, sysadmin_token, _start(client, sysadmin_token, key="opensuse-leap-161").json()["id"])
+    assert job["status"] == "done" and job["result"]["dhcp_expected"] is True
+    dl = image_pve.downloads[0]
+    assert "/leap/16.1/" in dl["url"] and dl["url"].endswith("Leap-16.1-Minimal-VM.x86_64-Cloud.qcow2")
+    assert dl["filename"] == "ccd-opensuse-leap-161.qcow2"
 
 
 def test_opensuse_has_no_agent_warning(client, image_pve, sysadmin_token):

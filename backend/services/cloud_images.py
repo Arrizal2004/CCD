@@ -1,6 +1,5 @@
 """
-Template VM dari cloud image resmi. Katalog sengaja kecil dan tetap: Ubuntu Server 24.04 LTS dan openSUSE Leap 16.0
-(satu per distro). Job mengunduh image ke Proxmox (dengan checksum), membuat VM dari disk itu, menambah CloudInit drive,
+Template VM dari cloud image resmi. Katalog sengaja kecil dan tetap: Ubuntu Server 24.04 LTS, openSUSE Leap 16.0, dan openSUSE Leap 16.1. Job mengunduh image ke Proxmox (dengan checksum), membuat VM dari disk itu, menambah CloudInit drive,
 menjadikannya template, dan hasilnya langsung muncul di form Create VM dan VM massal, tanpa langkah manual di Proxmox.
 
 Job disimpan di image_jobs supaya progresnya tetap terlihat setelah halaman ditutup. Backend yang berhenti di tengah jalan
@@ -39,6 +38,11 @@ CATALOG = [
      "url": "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2",
      "checksum_url": "https://download.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2.sha256",
      "checksum_name": "Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2", "checksum_algo": "sha256",
+     "default_user": "", "min_disk_gb": 10, "agent_included": True},
+    {"key": "opensuse-leap-161", "name": "openSUSE Leap 16.1", "family": "suse", "version": "16.1",
+     "url": "https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Minimal-VM.x86_64-Cloud.qcow2",
+     "checksum_url": "https://download.opensuse.org/distribution/leap/16.1/appliances/Leap-16.1-Minimal-VM.x86_64-Cloud.qcow2.sha256",
+     "checksum_name": "Leap-16.1-Minimal-VM.x86_64-Cloud.qcow2", "checksum_algo": "sha256",
      "default_user": "", "min_disk_gb": 10, "agent_included": True},
 ]
 
